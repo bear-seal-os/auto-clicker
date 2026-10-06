@@ -82,7 +82,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
-            Text("Clicks, keys, and point picking need Accessibility access.")
+            Text("Clicks, keys, and point picking need Accessibility access. Allow it once. Later updates keep this grant.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
