@@ -311,3 +311,38 @@ final class NumberParserTests: XCTestCase {
         XCTAssertEqual(NumberParser.decimal("abc"), .invalid)
     }
 }
+
+final class AppUpdateTests: XCTestCase {
+    func testNewerVersionComparison() {
+        XCTAssertTrue(AppVersion.isNewer("1.1.0", than: "1.0.0"))
+        XCTAssertTrue(AppVersion.isNewer("v1.10.0", than: "1.9.0"))
+        XCTAssertTrue(AppVersion.isNewer("1.0.1", than: "1.0"))
+        XCTAssertFalse(AppVersion.isNewer("1.0.0", than: "1.0.0"))
+        XCTAssertFalse(AppVersion.isNewer("v1.0.0", than: "1.1.0"))
+    }
+
+    func testReleaseFeedReturnsNewerZipOnly() throws {
+        let data = Data(
+            """
+            {
+              "tag_name": "v1.2.0",
+              "assets": [
+                {"name": "notes.txt", "browser_download_url": "https://example.com/notes.txt"},
+                {"name": "AutoClicker-macos.zip", "browser_download_url": "https://example.com/AutoClicker-macos.zip"}
+              ]
+            }
+            """.utf8
+        )
+
+        let update = try XCTUnwrap(ReleaseFeed.availableUpdate(from: data, currentVersion: "1.1.0"))
+        XCTAssertEqual(update.version, "1.2.0")
+        XCTAssertEqual(update.downloadURL.absoluteString, "https://example.com/AutoClicker-macos.zip")
+        XCTAssertNil(ReleaseFeed.availableUpdate(from: data, currentVersion: "1.2.0"))
+        XCTAssertNil(ReleaseFeed.availableUpdate(from: data, currentVersion: "2.0.0"))
+    }
+
+    func testReleaseFeedIgnoresMissingAsset() {
+        let data = Data(#"{"tag_name":"v9.0.0","assets":[]}"#.utf8)
+        XCTAssertNil(ReleaseFeed.availableUpdate(from: data, currentVersion: "1.0.0"))
+    }
+}

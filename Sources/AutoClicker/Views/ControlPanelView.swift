@@ -25,6 +25,9 @@ struct ControlPanelView: View {
         HStack {
             Text("Auto Clicker")
                 .font(.headline)
+            Text(AppVersion.current())
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
             if model.isRunning {
                 Text("Running")
@@ -127,6 +130,21 @@ struct ControlPanelView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let update = model.availableUpdate {
+                HStack {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(.blue)
+                    Text("Version \(update.version) is available")
+                        .font(.caption)
+                    Spacer()
+                    Button(model.isUpdating ? "Updating…" : "Update") {
+                        model.installUpdate()
+                    }
+                    .disabled(model.isUpdating)
+                    .controlSize(.small)
+                }
+            }
+
             if !model.hasAccessibility {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")

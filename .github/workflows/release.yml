@@ -32,5 +32,7 @@ jobs:
 
           This build is ad-hoc signed and not notarized, so macOS shows an unidentified-developer warning. Grant Accessibility again after each update.
 
+          The app checks for updates on launch. Choose **Update** when a newer version is available.
+
           EOF
           )"

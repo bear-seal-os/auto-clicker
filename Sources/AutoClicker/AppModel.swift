@@ -11,12 +11,15 @@ final class AppModel: ObservableObject {
     @Published var isPickingPoint = false
     @Published var hasAccessibility = false
     @Published var statusMessage: String?
+    @Published var availableUpdate: AvailableUpdate?
+    @Published var isUpdating = false
     @Published private(set) var invalidNumericFieldIDs: Set<String> = []
 
     private let poster: InputPosting
     private let runner: ActionRunner
     private let pointPicker = PointPicker()
     private let hotkey = HotkeyController()
+    private let updates = GitHubUpdateClient()
     private var accessibilityTimer: Timer?
 
     init(poster: InputPosting = InputPoster(), settings: AppSettings? = nil) {
@@ -30,6 +33,9 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 self?.refreshAccessibility()
             }
+        }
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            Task { await checkForUpdate() }
         }
     }
 
@@ -73,6 +79,32 @@ final class AppModel: ObservableObject {
         _ = AccessibilityPermission.isTrusted(prompt: true)
         AccessibilityPermission.openSettings()
         refreshAccessibility()
+    }
+
+    func checkForUpdate() async {
+        let current = AppVersion.current()
+        availableUpdate = await updates.availableUpdate(currentVersion: current)
+    }
+
+    func installUpdate() {
+        guard let update = availableUpdate, !isUpdating else { return }
+        let appURL = Bundle.main.bundleURL
+        guard appURL.pathExtension == "app" else {
+            statusMessage = "Install the app to update it from here."
+            return
+        }
+        isUpdating = true
+        statusMessage = nil
+        Task {
+            do {
+                stop()
+                try await AppBundleUpdater.install(update: update, replacing: appURL)
+                NSApp.terminate(nil)
+            } catch {
+                isUpdating = false
+                statusMessage = "Update failed. Download the latest release from GitHub."
+            }
+        }
     }
 
     func toggleRunning() {

@@ -17,6 +17,8 @@ macOS 14 or later, Apple silicon.
 
 This build is ad-hoc signed and not notarized, so macOS warns on first launch. Each new release needs Accessibility turned on again.
 
+The installed app checks GitHub on launch. When a newer version is listed, choose **Update**. The app quits, replaces itself, and reopens.
+
 ## Build and run
 
 ```bash
