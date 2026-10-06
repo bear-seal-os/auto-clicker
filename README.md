@@ -15,7 +15,7 @@ macOS 14 or later, Apple silicon.
 3. Right-click `AutoClicker.app` and choose **Open**, then **Open** again.
 4. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**.
 
-This build is ad-hoc signed and not notarized, so macOS warns on first launch. Each new release needs Accessibility turned on again.
+This build is not notarized, so macOS warns on first launch. Accessibility is granted once. Later updates keep that grant. The first update signed with this identity still asks once, because earlier releases were ad-hoc signed.
 
 The installed app checks GitHub on launch and from **Settings → Check for Updates**. When a newer version is listed, choose **Update**. The app quits, replaces itself, and reopens.
 
@@ -25,7 +25,7 @@ The installed app checks GitHub on launch and from **Settings → Check for Upda
 ./scripts/build-app.sh --open
 ```
 
-The script builds a release binary, wraps it in `AutoClicker.app`, and code-signs it. If an Apple Development identity is available, it uses that. Otherwise it ad-hoc signs the app, and macOS will ask for Accessibility again after every rebuild.
+The script builds a release binary, wraps it in `AutoClicker.app`, and code-signs it. A release uses the stable signing identity in `~/Library/Application Support/AutoClicker/signing` when that certificate is present, so Accessibility survives the next build. Without it, the script uses a Developer ID or Apple Development identity, and otherwise ad-hoc signs. An ad-hoc build asks for Accessibility again after every rebuild.
 
 To build without launching:
 

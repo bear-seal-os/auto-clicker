@@ -1,18 +1,9 @@
 import AppKit
 import SwiftUI
 
-private enum PanelTab: String, CaseIterable, Identifiable {
-    case clicker
+private enum PanelSection: Hashable {
+    case mode(AppMode)
     case settings
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .clicker: return "Clicker"
-        case .settings: return "Settings"
-        }
-    }
 }
 
 struct ControlPanelView: View {
@@ -20,33 +11,48 @@ struct ControlPanelView: View {
     /// Return-to-start crashes SwiftUI when this view is hosted in a
     /// `MenuBarExtra` window. The Dock window can keep it.
     var enablesDefaultAction = false
-    @State private var panelTab = PanelTab.clicker
+    @State private var showsSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            panelPicker
-            switch panelTab {
-            case .clicker:
-                header
-                modePicker
+            header
+            sectionPicker
+            if showsSettings {
+                SettingsView()
+            } else {
                 sharedControls
                 modeSpecificControls
                 Divider()
                 hotkeySection
                 footer
-            case .settings:
-                SettingsView()
             }
         }
         .padding(14)
-        .frame(width: 380)
+        .frame(width: 460)
     }
 
-    private var panelPicker: some View {
-        Picker("Section", selection: $panelTab) {
-            ForEach(PanelTab.allCases) { tab in
-                Text(tab.title).tag(tab)
+    private var section: Binding<PanelSection> {
+        Binding(
+            get: { showsSettings ? .settings : .mode(model.settings.mode) },
+            set: { newValue in
+                switch newValue {
+                case .mode(let mode):
+                    if model.isRunning, mode != model.settings.mode { return }
+                    showsSettings = false
+                    model.settings.mode = mode
+                case .settings:
+                    showsSettings = true
+                }
             }
+        )
+    }
+
+    private var sectionPicker: some View {
+        Picker("Mode", selection: section) {
+            ForEach(AppMode.allCases) { mode in
+                Text(mode.title).tag(PanelSection.mode(mode))
+            }
+            Text("Settings").tag(PanelSection.settings)
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -66,17 +72,6 @@ struct ControlPanelView: View {
                     .foregroundStyle(.green)
             }
         }
-    }
-
-    private var modePicker: some View {
-        Picker("Mode", selection: $model.settings.mode) {
-            ForEach(AppMode.allCases) { mode in
-                Text(mode.title).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .disabled(model.isRunning)
-        .labelsHidden()
     }
 
     private var sharedControls: some View {

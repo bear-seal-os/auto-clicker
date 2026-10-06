@@ -14,6 +14,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: swift test
       - run: ./scripts/build-app.sh
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
       - run: ditto -c -k --keepParent AutoClicker.app AutoClicker-macos.zip
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -30,7 +33,7 @@ jobs:
           3. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**.
           4. Enable **Auto Clicker** in **System Settings → Privacy & Security → Accessibility**.
 
-          This build is ad-hoc signed and not notarized, so macOS shows an unidentified-developer warning. Grant Accessibility again after each update.
+          This build is not notarized, so macOS shows an unidentified-developer warning on first launch. Accessibility is granted once and stays granted for later updates signed with the same identity.
 
           The app checks for updates on launch. Choose **Update** when a newer version is available.
 

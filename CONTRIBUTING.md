@@ -7,7 +7,7 @@ swift test
 ./scripts/build-app.sh
 ```
 
-`./scripts/build-app.sh` builds a release binary, wraps it in `AutoClicker.app`, and code-signs it. Without an Apple Development identity it ad-hoc signs the app. After every ad-hoc rebuild, grant Accessibility again in **System Settings → Privacy & Security → Accessibility**.
+`./scripts/build-app.sh` builds a release binary, wraps it in `AutoClicker.app`, and code-signs it. Releases keep a stable signing identity so Accessibility survives updates. Without that identity, or a Developer ID / Apple Development certificate, the script ad-hoc signs and macOS asks for Accessibility again after every rebuild.
 
 ## Layout rules
 
@@ -16,7 +16,7 @@ swift test
 - Views talk only to `AppModel`.
 - New runner behavior gets a test with `FakePoster` and `ControllableClock`.
 - Interval minimum stays 10 ms.
-- Shipped builds stay ad-hoc signed until a Developer ID exists.
+- Shipped builds use the stable Auto Clicker signing identity so Accessibility survives updates. Ad-hoc signing is only the fallback when that identity is missing.
 
 ## Pull requests
 
