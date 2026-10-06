@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import Security
 
 final class PointPicker {
     private var monitor: Any?
@@ -81,5 +82,37 @@ enum AccessibilityPermission {
     static func openSettings() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
+    }
+
+    /// A grant for an older signature stays checked but does not apply to this
+    /// binary. Clear that row once for the current designated requirement.
+    static func resetStaleGrantIfNeeded() {
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        guard !isTrusted(prompt: false) else { return }
+        guard let requirement = designatedRequirement() else { return }
+        let key = "accessibilityRequirement"
+        if UserDefaults.standard.string(forKey: key) == requirement { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "com.svacmai.autoclicker"]
+        try? process.run()
+        process.waitUntilExit()
+        UserDefaults.standard.set(requirement, forKey: key)
+    }
+
+    private static func designatedRequirement() -> String? {
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(Bundle.main.bundleURL as CFURL, [], &code) == errSecSuccess,
+              let code
+        else { return nil }
+        var requirement: SecRequirement?
+        guard SecCodeCopyDesignatedRequirement(code, [], &requirement) == errSecSuccess,
+              let requirement
+        else { return nil }
+        var text: CFString?
+        guard SecRequirementCopyString(requirement, [], &text) == errSecSuccess,
+              let text
+        else { return nil }
+        return text as String
     }
 }

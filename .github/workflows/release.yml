@@ -4,38 +4,9 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-
 jobs:
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: swift test
-      - run: ./scripts/build-app.sh
-        env:
-          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-      - run: ditto -c -k --keepParent AutoClicker.app AutoClicker-macos.zip
-      - env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" AutoClicker-macos.zip \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "$(cat <<'EOF'
-          ## Install
-
-          macOS 14 or later, Apple silicon.
-
-          1. Download `AutoClicker-macos.zip` and unzip it.
-          2. Right-click `AutoClicker.app` and choose **Open**, then **Open** again.
-          3. If macOS blocks it: **System Settings → Privacy & Security → Open Anyway**.
-          4. Enable **Auto Clicker** in **System Settings → Privacy & Security → Accessibility**.
-
-          This build is not notarized, so macOS shows an unidentified-developer warning on first launch. Accessibility is granted once and stays granted for later updates signed with the same identity.
-
-          The app checks for updates on launch. Choose **Update** when a newer version is available.
-
-          EOF
-          )"

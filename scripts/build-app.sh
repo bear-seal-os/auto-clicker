@@ -25,6 +25,17 @@ cp "$ROOT/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 chmod +x "$MACOS_DIR/AutoClicker"
 
 sign_app() {
+  local identity=""
+  identity="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)"
+  if [[ -z "$identity" ]]; then
+    identity="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development:.*\)"/\1/p' | head -1)"
+  fi
+  if [[ -n "$identity" ]]; then
+    codesign --force --sign "$identity" "$APP_DIR"
+    echo "Signed with: $identity"
+    return
+  fi
+
   local p12=""
   local password=""
   local dir=""

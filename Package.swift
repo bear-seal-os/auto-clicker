@@ -16,7 +16,8 @@ let package = Package(
             exclude: ["Info.plist"],
             linkerSettings: [
                 .linkedFramework("Carbon"),
-                .linkedFramework("ApplicationServices")
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("Security")
             ]
         ),
         .testTarget(

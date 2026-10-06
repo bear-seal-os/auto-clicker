@@ -28,6 +28,9 @@ final class AppModel: ObservableObject {
         self.runner = ActionRunner(poster: poster)
         self.settings = settings ?? SettingsStore.load()
         self.settings.clamp()
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            AccessibilityPermission.resetStaleGrantIfNeeded()
+        }
         refreshAccessibility()
         registerHotkey()
         accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in

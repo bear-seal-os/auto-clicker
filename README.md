@@ -15,7 +15,7 @@ macOS 14 or later, Apple silicon.
 3. Right-click `AutoClicker.app` and choose **Open**, then **Open** again.
 4. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**.
 
-This build is not notarized, so macOS warns on first launch. Accessibility is granted once. Later updates keep that grant. The first update signed with this identity still asks once, because earlier releases were ad-hoc signed.
+This build is signed with an Apple Development certificate and is not notarized, so macOS warns on first launch. Accessibility is granted once for that certificate. Later updates signed with it keep the grant.
 
 The installed app checks GitHub on launch and from **Settings → Check for Updates**. When a newer version is listed, choose **Update**. The app quits, replaces itself, and reopens.
 
@@ -25,7 +25,7 @@ The installed app checks GitHub on launch and from **Settings → Check for Upda
 ./scripts/build-app.sh --open
 ```
 
-The script builds a release binary, wraps it in `AutoClicker.app`, and code-signs it. A release uses the stable signing identity in `~/Library/Application Support/AutoClicker/signing` when that certificate is present, so Accessibility survives the next build. Without it, the script uses a Developer ID or Apple Development identity, and otherwise ad-hoc signs. An ad-hoc build asks for Accessibility again after every rebuild.
+The script builds a release binary, wraps it in `AutoClicker.app`, and code-signs it. It uses a Developer ID or Apple Development identity when one is in the keychain, so Accessibility survives later builds. A self-signed certificate has no Team ID, and macOS treats every update as a new app. Without an Apple-issued identity the script ad-hoc signs, and Accessibility must be granted again after every rebuild.
 
 To build without launching:
 
