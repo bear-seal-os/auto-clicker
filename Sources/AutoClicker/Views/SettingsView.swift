@@ -19,7 +19,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("About")
                 .font(.subheadline.weight(.semibold))
-            Text("Repeats mouse clicks, key presses, and short macros from the menu bar or this window.")
+            Text("Repeats mouse clicks, key presses, and short macros from the menu bar or the Dock window.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
