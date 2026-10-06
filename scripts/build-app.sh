@@ -32,7 +32,11 @@ sign_app() {
   if [[ -n "${SIGNING_P12_BASE64:-}" && -n "${SIGNING_PASSWORD:-}" ]]; then
     dir="$(mktemp -d)"
     p12="$dir/signing.p12"
-    printf '%s\n' "$SIGNING_P12_BASE64" | openssl base64 -d -out "$p12"
+    printf '%s' "$SIGNING_P12_BASE64" | tr -d '[:space:]' | base64 -D > "$p12"
+    if [[ ! -s "$p12" ]]; then
+      echo "Could not decode the signing certificate." >&2
+      exit 1
+    fi
     password="$SIGNING_PASSWORD"
   elif [[ -f "$HOME/Library/Application Support/AutoClicker/signing/signing.p12" && -f "$HOME/Library/Application Support/AutoClicker/signing/password" ]]; then
     p12="$HOME/Library/Application Support/AutoClicker/signing/signing.p12"
