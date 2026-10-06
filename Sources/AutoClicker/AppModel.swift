@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published var hasAccessibility = false
     @Published var statusMessage: String?
     @Published var availableUpdate: AvailableUpdate?
+    @Published var updateCheckState: UpdateCheckState = .idle
     @Published var isUpdating = false
     @Published private(set) var invalidNumericFieldIDs: Set<String> = []
 
@@ -81,9 +82,28 @@ final class AppModel: ObservableObject {
         refreshAccessibility()
     }
 
-    func checkForUpdate() async {
-        let current = AppVersion.current()
-        availableUpdate = await updates.availableUpdate(currentVersion: current)
+    func checkForUpdate(showResult: Bool = false) async {
+        if showResult {
+            updateCheckState = .checking
+        }
+        switch await updates.check(currentVersion: AppVersion.current()) {
+        case .available(let update):
+            availableUpdate = update
+            updateCheckState = .idle
+        case .upToDate:
+            availableUpdate = nil
+            if showResult {
+                updateCheckState = .upToDate
+            }
+        case .failed:
+            if showResult {
+                updateCheckState = .failed
+            }
+        }
+    }
+
+    func openRepository() {
+        NSWorkspace.shared.open(GitHubUpdateClient.repositoryURL)
     }
 
     func installUpdate() {

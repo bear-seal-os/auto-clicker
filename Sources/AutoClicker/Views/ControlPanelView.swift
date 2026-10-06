@@ -1,24 +1,55 @@
 import AppKit
 import SwiftUI
 
+private enum PanelTab: String, CaseIterable, Identifiable {
+    case clicker
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .clicker: return "Clicker"
+        case .settings: return "Settings"
+        }
+    }
+}
+
 struct ControlPanelView: View {
     @EnvironmentObject private var model: AppModel
     /// Return-to-start crashes SwiftUI when this view is hosted in a
     /// `MenuBarExtra` window. The Dock window can keep it.
     var enablesDefaultAction = false
+    @State private var panelTab = PanelTab.clicker
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
-            modePicker
-            sharedControls
-            modeSpecificControls
-            Divider()
-            hotkeySection
-            footer
+            panelPicker
+            switch panelTab {
+            case .clicker:
+                header
+                modePicker
+                sharedControls
+                modeSpecificControls
+                Divider()
+                hotkeySection
+                footer
+            case .settings:
+                SettingsView()
+            }
         }
         .padding(14)
         .frame(width: 380)
+    }
+
+    private var panelPicker: some View {
+        Picker("Section", selection: $panelTab) {
+            ForEach(PanelTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     private var header: some View {

@@ -35,33 +35,68 @@ enum AppVersion {
     }
 }
 
+enum ReleaseLookup: Equatable {
+    case newer(AvailableUpdate)
+    case notNewer
+    case unreadable
+}
+
+enum UpdateCheckResult: Equatable {
+    case upToDate
+    case available(AvailableUpdate)
+    case failed
+}
+
+enum UpdateCheckState: Equatable {
+    case idle
+    case checking
+    case upToDate
+    case failed
+}
+
 enum ReleaseFeed {
     static let assetName = "AutoClicker-macos.zip"
 
     static func availableUpdate(from data: Data, currentVersion: String) -> AvailableUpdate? {
+        if case .newer(let update) = lookup(from: data, currentVersion: currentVersion) {
+            return update
+        }
+        return nil
+    }
+
+    static func lookup(from data: Data, currentVersion: String) -> ReleaseLookup {
         guard
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let tag = json["tag_name"] as? String
-        else { return nil }
+        else { return .unreadable }
 
         let version = tag.lowercased().hasPrefix("v") ? String(tag.dropFirst()) : tag
-        guard AppVersion.isNewer(version, than: currentVersion) else { return nil }
+        guard AppVersion.isNewer(version, than: currentVersion) else { return .notNewer }
         guard
             let assets = json["assets"] as? [[String: Any]],
             let asset = assets.first(where: { $0["name"] as? String == assetName }),
             let urlString = asset["browser_download_url"] as? String,
             let url = URL(string: urlString)
-        else { return nil }
+        else { return .unreadable }
 
-        return AvailableUpdate(version: version, downloadURL: url)
+        return .newer(AvailableUpdate(version: version, downloadURL: url))
     }
 }
 
 struct GitHubUpdateClient: Sendable {
+    static let repositoryURL = URL(string: "https://github.com/bear-seal-os/auto-clicker")!
+
     var session: URLSession = .shared
     var latestReleaseURL = URL(string: "https://api.github.com/repos/bear-seal-os/auto-clicker/releases/latest")!
 
     func availableUpdate(currentVersion: String) async -> AvailableUpdate? {
+        guard case .available(let update) = await check(currentVersion: currentVersion) else {
+            return nil
+        }
+        return update
+    }
+
+    func check(currentVersion: String) async -> UpdateCheckResult {
         var request = URLRequest(url: latestReleaseURL)
         request.timeoutInterval = 20
         request.setValue("AutoClicker", forHTTPHeaderField: "User-Agent")
@@ -70,8 +105,16 @@ struct GitHubUpdateClient: Sendable {
             let (data, response) = try? await session.data(for: request),
             let http = response as? HTTPURLResponse,
             http.statusCode == 200
-        else { return nil }
-        return ReleaseFeed.availableUpdate(from: data, currentVersion: currentVersion)
+        else { return .failed }
+
+        switch ReleaseFeed.lookup(from: data, currentVersion: currentVersion) {
+        case .newer(let update):
+            return .available(update)
+        case .notNewer:
+            return .upToDate
+        case .unreadable:
+            return .failed
+        }
     }
 }
 

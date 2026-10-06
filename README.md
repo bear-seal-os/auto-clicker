@@ -17,7 +17,7 @@ macOS 14 or later, Apple silicon.
 
 This build is ad-hoc signed and not notarized, so macOS warns on first launch. Each new release needs Accessibility turned on again.
 
-The installed app checks GitHub on launch. When a newer version is listed, choose **Update**. The app quits, replaces itself, and reopens.
+The installed app checks GitHub on launch and from **Settings → Check for Updates**. When a newer version is listed, choose **Update**. The app quits, replaces itself, and reopens.
 
 ## Build and run
 
@@ -64,6 +64,8 @@ Shared controls:
 Macro steps each have their own interval. **Loop interval** is the pause between full passes of the step list.
 
 **Toggle Hotkey** defaults to ⌃⌥C. It must include at least one modifier, and it both starts and stops the current run.
+
+**Settings** shows the version, Accessibility status, and **Check for Updates**.
 
 ## Tests
 

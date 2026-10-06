@@ -344,5 +344,16 @@ final class AppUpdateTests: XCTestCase {
     func testReleaseFeedIgnoresMissingAsset() {
         let data = Data(#"{"tag_name":"v9.0.0","assets":[]}"#.utf8)
         XCTAssertNil(ReleaseFeed.availableUpdate(from: data, currentVersion: "1.0.0"))
+        XCTAssertEqual(ReleaseFeed.lookup(from: data, currentVersion: "1.0.0"), .unreadable)
+    }
+
+    func testReleaseFeedLookupReportsCurrentAndGarbage() {
+        let current = Data(
+            """
+            {"tag_name":"v1.2.1","assets":[{"name":"AutoClicker-macos.zip","browser_download_url":"https://example.com/AutoClicker-macos.zip"}]}
+            """.utf8
+        )
+        XCTAssertEqual(ReleaseFeed.lookup(from: current, currentVersion: "1.2.1"), .notNewer)
+        XCTAssertEqual(ReleaseFeed.lookup(from: Data("nope".utf8), currentVersion: "1.2.1"), .unreadable)
     }
 }
