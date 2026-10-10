@@ -17,20 +17,42 @@ struct ControlPanelView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             sectionPicker
-            if showsSettings {
-                SettingsView()
-            } else {
-                PresetBarView()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if showsSettings {
+                        SettingsView()
+                    } else {
+                        PresetBarView()
+                        Divider()
+                        sharedControls
+                        modeSpecificControls
+                        Divider()
+                        hotkeySection
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: Self.scrollMaxHeight)
+            if !showsSettings {
                 Divider()
-                sharedControls
-                modeSpecificControls
-                Divider()
-                hotkeySection
                 footer
             }
         }
         .padding(14)
         .frame(width: 460)
+        .frame(maxHeight: Self.panelMaxHeight)
+        .background(PinHostWindowToTop())
+    }
+
+    /// Hard cap so the menu-bar panel stays under the menu bar instead of
+    /// being recentered mid-screen by the system.
+    private static var panelMaxHeight: CGFloat {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+        return min(520, max(320, screenHeight * 0.55))
+    }
+
+    private static var scrollMaxHeight: CGFloat {
+        max(180, panelMaxHeight - 170)
     }
 
     private var section: Binding<PanelSection> {

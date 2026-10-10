@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showDockWindow() {
         if let window {
             window.makeKeyAndOrderFront(nil)
+            PanelWindowAnchor.pinNearTop(window)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
@@ -33,9 +34,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: host)
         window.title = "Auto Clicker"
         window.isReleasedWhenClosed = false
-        window.center()
+        host.view.layoutSubtreeIfNeeded()
+        let fitting = host.view.fittingSize
+        if fitting.width > 1, fitting.height > 1 {
+            window.setContentSize(fitting)
+        }
         self.window = window
         window.makeKeyAndOrderFront(nil)
+        PanelWindowAnchor.pinNearTop(window)
+        DispatchQueue.main.async {
+            PanelWindowAnchor.pinNearTop(window)
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 }

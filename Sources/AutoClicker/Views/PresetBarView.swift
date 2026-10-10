@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -23,11 +24,6 @@ struct PresetExportDocument: FileDocument {
     }
 }
 
-private enum PresetPickerChoice: Hashable {
-    case none
-    case preset(UUID)
-}
-
 struct PresetBarView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -43,27 +39,16 @@ struct PresetBarView: View {
         model.presetsForCurrentMode()
     }
 
-    private var selection: Binding<PresetPickerChoice> {
-        Binding(
-            get: {
-                if let id = model.selectedPresetID {
-                    return .preset(id)
-                }
-                return .none
-            },
-            set: { choice in
-                switch choice {
-                case .none:
-                    model.selectPreset(id: nil)
-                case .preset(let id):
-                    model.selectPreset(id: id)
-                }
-            }
-        )
-    }
-
     private var canManage: Bool { model.canManagePresets }
     private var hasSelection: Bool { model.selectedPresetID != nil }
+
+    private var selectedPresetName: String {
+        guard let id = model.selectedPresetID,
+              let preset = presets.first(where: { $0.id == id }) else {
+            return "None"
+        }
+        return preset.name
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -74,17 +59,7 @@ struct PresetBarView: View {
                 Text("Preset")
                     .font(.caption)
                 Spacer()
-                Picker("Preset", selection: selection) {
-                    Text("None").tag(PresetPickerChoice.none)
-                    ForEach(presets) { preset in
-                        Text(preset.name).tag(PresetPickerChoice.preset(preset.id))
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
-                .frame(maxWidth: 220, alignment: .trailing)
-                .disabled(!canManage)
+                presetDropdown
             }
 
             HStack(spacing: 6) {
@@ -191,6 +166,60 @@ struct PresetBarView: View {
         .onChange(of: model.presetLibrary) { _, _ in
             clearStaleSelection()
         }
+    }
+
+    private var presetDropdown: some View {
+        Menu {
+            Button {
+                model.selectPreset(id: nil)
+            } label: {
+                if model.selectedPresetID == nil {
+                    Label("None", systemImage: "checkmark")
+                } else {
+                    Text("None")
+                }
+            }
+            if !presets.isEmpty {
+                Divider()
+            }
+            ForEach(presets) { preset in
+                Button {
+                    model.selectPreset(id: preset.id)
+                } label: {
+                    if model.selectedPresetID == preset.id {
+                        Label(preset.name, systemImage: "checkmark")
+                    } else {
+                        Text(preset.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(selectedPresetName)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(width: 200, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(!canManage)
+        .controlSize(.small)
     }
 
     private var exportFilename: String {
