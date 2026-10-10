@@ -1,3 +1,5 @@
+import CoreGraphics
+import Darwin
 import Foundation
 @testable import AutoClicker
 import XCTest
@@ -36,6 +38,27 @@ final class ControllableClock: Clock {
         if let sleepHandler {
             await sleepHandler(milliseconds)
         }
+    }
+}
+
+final class PostedMouseEventTests: XCTestCase {
+    func testPrepareAssignsUptimeTimestamp() throws {
+        let prepared = try XCTUnwrap(
+            CGEvent(
+                mouseEventSource: nil,
+                mouseType: .leftMouseDown,
+                mouseCursorPosition: .zero,
+                mouseButton: .left
+            )
+        )
+        XCTAssertEqual(prepared.timestamp, 0)
+
+        PostedMouseEvent.prepare(prepared, eventNumber: 7)
+
+        let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        XCTAssertGreaterThan(prepared.timestamp, 0)
+        XCTAssertLessThanOrEqual(prepared.timestamp, now)
+        XCTAssertEqual(prepared.getIntegerValueField(.mouseEventNumber), 7)
     }
 }
 

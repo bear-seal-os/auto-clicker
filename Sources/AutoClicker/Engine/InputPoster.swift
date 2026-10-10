@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import Darwin
 import Foundation
 
 protocol InputPosting: AnyObject {
@@ -10,6 +11,8 @@ protocol InputPosting: AnyObject {
 }
 
 final class InputPoster: InputPosting {
+    private var nextMouseEventNumber: Int64 = 0
+
     func click(at point: CGPoint, button: MouseButton) {
         let (downType, upType, cgButton): (CGEventType, CGEventType, CGMouseButton) = {
             switch button {
@@ -22,8 +25,26 @@ final class InputPoster: InputPosting {
 
         let source = CGEventSource(stateID: .hidSystemState)
         source?.localEventsSuppressionInterval = 0
+
+        let origin = currentMouseLocation()
         CGWarpMouseCursorPosition(point)
         CGAssociateMouseAndMouseCursorPosition(1)
+
+        // Warping updates the system pointer and does not deliver a move.
+        // Roblox only clicks a control it has already hovered.
+        if let moved = CGEvent(
+            mouseEventSource: source,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) {
+            moved.setIntegerValueField(.mouseEventDeltaX, value: Int64((point.x - origin.x).rounded()))
+            moved.setIntegerValueField(.mouseEventDeltaY, value: Int64((point.y - origin.y).rounded()))
+            post(moved)
+            if abs(point.x - origin.x) > 1 || abs(point.y - origin.y) > 1 {
+                usleep(20_000)
+            }
+        }
 
         guard let down = CGEvent(
             mouseEventSource: source,
@@ -42,8 +63,20 @@ final class InputPoster: InputPosting {
 
         down.setIntegerValueField(.mouseEventClickState, value: 1)
         up.setIntegerValueField(.mouseEventClickState, value: 1)
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        post(down)
+        // A same-instant release never shows up as a press in Roblox's frame loop.
+        usleep(20_000)
+        post(up)
+    }
+
+    private func post(_ event: CGEvent) {
+        PostedMouseEvent.prepare(event, eventNumber: nextEventNumber())
+        event.post(tap: .cghidEventTap)
+    }
+
+    private func nextEventNumber() -> Int64 {
+        nextMouseEventNumber += 1
+        return nextMouseEventNumber
     }
 
     func pressKey(_ chord: KeyChord) {
@@ -72,5 +105,14 @@ final class InputPoster: InputPosting {
         if ns.contains(.control) { flags.insert(.maskControl) }
         if ns.contains(.shift) { flags.insert(.maskShift) }
         return flags
+    }
+}
+
+enum PostedMouseEvent {
+    /// `CGEvent` mouse initializers leave the timestamp at 0. macOS 15 and later
+    /// drop those events, so the pointer can still be warped while the click never arrives.
+    static func prepare(_ event: CGEvent, eventNumber: Int64) {
+        event.timestamp = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        event.setIntegerValueField(.mouseEventNumber, value: eventNumber)
     }
 }
