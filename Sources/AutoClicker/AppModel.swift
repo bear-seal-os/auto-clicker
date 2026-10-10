@@ -14,6 +14,7 @@ final class AppModel: ObservableObject {
     @Published var availableUpdate: AvailableUpdate?
     @Published var updateCheckState: UpdateCheckState = .idle
     @Published var isUpdating = false
+    @Published var runCue: RunCue?
     @Published private(set) var invalidNumericFieldIDs: Set<String> = []
 
     private let poster: InputPosting
@@ -22,6 +23,7 @@ final class AppModel: ObservableObject {
     private let hotkey = HotkeyController()
     private let updates = GitHubUpdateClient()
     private var accessibilityTimer: Timer?
+    private let overlayController = RunOverlayController()
 
     init(poster: InputPosting = InputPoster(), settings: AppSettings? = nil) {
         self.poster = poster
@@ -41,6 +43,7 @@ final class AppModel: ObservableObject {
         if Bundle.main.bundleURL.pathExtension == "app" {
             Task { await checkForUpdate() }
         }
+        overlayController.bind(to: self)
     }
 
     func shutdown() {
@@ -49,6 +52,8 @@ final class AppModel: ObservableObject {
         hotkey.unregister()
         pointPicker.cancel()
         runner.stop()
+        runCue = nil
+        overlayController.shutdown()
     }
 
     var hasInvalidNumericInput: Bool { !invalidNumericFieldIDs.isEmpty }
@@ -144,14 +149,25 @@ final class AppModel: ObservableObject {
         snapshot.clamp()
         isRunning = true
         statusMessage = nil
-        runner.start(settings: snapshot) { [weak self] in
-            self?.isRunning = false
-        }
+        runCue = nil
+        runner.start(
+            settings: snapshot,
+            onCue: { [weak self] cue in
+                Task { @MainActor in
+                    self?.runCue = cue
+                }
+            },
+            onFinished: { [weak self] in
+                self?.isRunning = false
+                self?.runCue = nil
+            }
+        )
     }
 
     func stop() {
         runner.stop()
         isRunning = false
+        runCue = nil
     }
 
     func beginPickClickPoint() {

@@ -82,6 +82,47 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(loaded.mode, .key)
         XCTAssertEqual(loaded.intervalMilliseconds, 42)
     }
+
+    func testOverlayDefaultsWhenMissingFromSavedJSON() throws {
+        var legacy = AppSettings.default
+        legacy.overlay = OverlaySettings(
+            isEnabled: false,
+            corner: .bottomLeft,
+            opacity: 0.5,
+            accent: .red
+        )
+        var encoded = try JSONEncoder().encode(legacy)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "overlay")
+        encoded = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: encoded)
+        XCTAssertEqual(decoded.overlay, .default)
+    }
+
+    func testOverlayOpacityClamps() {
+        var settings = AppSettings.default
+        settings.overlay.opacity = 0.1
+        settings.clamp()
+        XCTAssertEqual(settings.overlay.opacity, OverlaySettings.minimumOpacity)
+
+        settings.overlay.opacity = 1.5
+        settings.clamp()
+        XCTAssertEqual(settings.overlay.opacity, OverlaySettings.maximumOpacity)
+    }
+
+    func testOverlayRoundTrip() throws {
+        var settings = AppSettings.default
+        settings.overlay = OverlaySettings(
+            isEnabled: false,
+            corner: .bottomRight,
+            opacity: 0.55,
+            accent: .purple
+        )
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+        XCTAssertEqual(decoded.overlay, settings.overlay)
+    }
 }
 
 final class MacroStepTests: XCTestCase {
@@ -253,6 +294,98 @@ final class ActionRunnerTests: XCTestCase {
 
         XCTAssertFalse(runner.isRunning)
         XCTAssertGreaterThanOrEqual(poster.clicks.count, 1)
+    }
+
+    func testIntervalModePublishesCues() async {
+        let poster = FakePoster()
+        let clock = ControllableClock()
+        let runner = ActionRunner(poster: poster, clock: clock)
+        var cues: [RunCue] = []
+
+        var settings = AppSettings.default
+        settings.mode = .clickHere
+        settings.mouseButton = .left
+        settings.repeatMode = .count
+        settings.repeatCount = 2
+        settings.intervalMilliseconds = 25
+
+        let finished = expectation(description: "finished")
+        runner.start(
+            settings: settings,
+            onCue: { cue in
+                if let cue { cues.append(cue) }
+            },
+            onFinished: { finished.fulfill() }
+        )
+        await fulfillment(of: [finished], timeout: 2)
+
+        XCTAssertEqual(cues.count, 2)
+        XCTAssertEqual(cues[0].currentLabel, "Left click")
+        XCTAssertEqual(cues[0].nextLabel, "Left click")
+        XCTAssertEqual(cues[0].waitMilliseconds, 25)
+        XCTAssertEqual(cues[1].currentLabel, "Left click")
+        XCTAssertEqual(cues[1].nextLabel, "Done")
+        XCTAssertEqual(cues[1].waitMilliseconds, 0)
+    }
+
+    func testMacroPublishesStepAndLoopCues() async {
+        let poster = FakePoster()
+        let clock = ControllableClock()
+        let runner = ActionRunner(poster: poster, clock: clock)
+        var cues: [RunCue] = []
+        let chord = KeyChord(keyCode: 0, modifiers: 0, displayName: "A")
+
+        var settings = AppSettings.default
+        settings.mode = .macro
+        settings.repeatMode = .count
+        settings.repeatCount = 2
+        settings.macroLoopIntervalMilliseconds = 40
+        settings.macroSteps = [
+            .click(ScreenPoint(x: 1, y: 2), button: .left, intervalMilliseconds: 5),
+            .key(chord, intervalMilliseconds: 7)
+        ]
+
+        let finished = expectation(description: "finished")
+        runner.start(
+            settings: settings,
+            onCue: { cue in
+                if let cue { cues.append(cue) }
+            },
+            onFinished: { finished.fulfill() }
+        )
+        await fulfillment(of: [finished], timeout: 2)
+
+        XCTAssertEqual(cues.map(\.currentLabel), [
+            "Left click (1, 2)",
+            "A",
+            "Loop pause",
+            "Left click (1, 2)",
+            "A"
+        ])
+        XCTAssertEqual(cues.map(\.nextLabel), [
+            "A",
+            "Loop pause",
+            "Left click (1, 2)",
+            "A",
+            "Done"
+        ])
+        XCTAssertEqual(cues.map(\.waitMilliseconds), [5, 7, 40, 5, 0])
+    }
+}
+
+final class RunLabelsTests: XCTestCase {
+    func testIntervalAndMacroLabels() {
+        var settings = AppSettings.default
+        settings.mode = .clickPoint
+        settings.mouseButton = .right
+        settings.clickPoint = ScreenPoint(x: 10, y: 20)
+        XCTAssertEqual(RunLabels.intervalAction(settings), "Right click (10, 20)")
+
+        settings.mode = .key
+        settings.keyChord = KeyChord(keyCode: 49, modifiers: 0, displayName: "Space")
+        XCTAssertEqual(RunLabels.intervalAction(settings), "Space")
+
+        XCTAssertEqual(RunLabels.macroStep(.wait(10)), "Wait")
     }
 }
 

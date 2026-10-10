@@ -63,9 +63,11 @@ Shared controls:
 
 Macro steps each have their own interval. **Loop interval** is the pause between full passes of the step list.
 
+While a run is active, a small click-through overlay shows the current action, the next action, and a countdown for the wait between them. Turn it off or change corner, opacity, and accent color under **Settings → Run Overlay**.
+
 **Toggle Hotkey** defaults to ⌃⌥C. It must include at least one modifier, and it both starts and stops the current run.
 
-**Settings** shows the version, Accessibility status, and **Check for Updates**.
+**Settings** shows the version, Run Overlay options, Accessibility status, and **Check for Updates**.
 
 ## Tests
 

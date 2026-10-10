@@ -19,6 +19,7 @@ final class ActionRunner {
     private let poster: InputPosting
     private let clock: Clock
     private var task: Task<Void, Never>?
+    private var onCue: ((RunCue?) -> Void)?
 
     private(set) var isRunning = false
 
@@ -27,14 +28,21 @@ final class ActionRunner {
         self.clock = clock
     }
 
-    func start(settings: AppSettings, onFinished: @escaping @MainActor () -> Void) {
+    func start(
+        settings: AppSettings,
+        onCue: ((RunCue?) -> Void)? = nil,
+        onFinished: @escaping @MainActor () -> Void
+    ) {
         stop()
         isRunning = true
+        self.onCue = onCue
         let snapshot = settings
         task = Task { [weak self] in
             guard let self else { return }
             await self.run(settings: snapshot)
             await MainActor.run {
+                self.publishCue(nil)
+                self.onCue = nil
                 self.isRunning = false
                 onFinished()
             }
@@ -45,6 +53,22 @@ final class ActionRunner {
         task?.cancel()
         task = nil
         isRunning = false
+        let clear = onCue
+        onCue = nil
+        DispatchQueue.main.async {
+            clear?(nil)
+        }
+    }
+
+    @MainActor
+    private func publishCue(_ cue: RunCue?) {
+        onCue?(cue)
+    }
+
+    private func emit(_ cue: RunCue) async {
+        await MainActor.run {
+            self.publishCue(cue)
+        }
     }
 
     private func run(settings: AppSettings) async {
@@ -59,11 +83,25 @@ final class ActionRunner {
     private func runIntervalMode(settings: AppSettings) async {
         let limit = settings.repeatMode == .count ? settings.repeatCount : Int.max
         var performed = 0
+        let label = RunLabels.intervalAction(settings)
 
         while !Task.isCancelled && performed < limit {
             performTick(settings: settings)
             performed += 1
-            if performed >= limit || Task.isCancelled { break }
+            if performed >= limit || Task.isCancelled {
+                if !Task.isCancelled {
+                    await emit(.finished(current: label, startedAt: clock.now()))
+                }
+                break
+            }
+            await emit(
+                .waiting(
+                    current: label,
+                    next: label,
+                    waitMilliseconds: settings.intervalMilliseconds,
+                    startedAt: clock.now()
+                )
+            )
             await clock.sleep(milliseconds: settings.intervalMilliseconds)
         }
     }
@@ -86,33 +124,114 @@ final class ActionRunner {
         guard !settings.macroSteps.isEmpty else { return }
         let limit = settings.repeatMode == .count ? settings.repeatCount : Int.max
         var loops = 0
+        let steps = settings.macroSteps
 
         while !Task.isCancelled && loops < limit {
-            for step in settings.macroSteps {
+            for index in steps.indices {
                 if Task.isCancelled { return }
-                await performMacroStep(step)
+                let step = steps[index]
+                let current = RunLabels.macroStep(step)
+                let isLastStep = index == steps.count - 1
+                let isLastLoop = loops + 1 >= limit
+
+                switch step.kind {
+                case .click:
+                    if let point = step.point {
+                        poster.click(at: point.cgPoint, button: step.mouseButton)
+                    }
+                    if isLastStep, isLastLoop {
+                        await emit(.finished(current: current, startedAt: clock.now()))
+                    } else {
+                        let next = nextMacroLabel(
+                            steps: steps,
+                            afterIndex: index,
+                            willLoop: !isLastLoop,
+                            loopInterval: settings.macroLoopIntervalMilliseconds
+                        )
+                        await emit(
+                            .waiting(
+                                current: current,
+                                next: next,
+                                waitMilliseconds: step.intervalMilliseconds,
+                                startedAt: clock.now()
+                            )
+                        )
+                    }
+                    await clock.sleep(milliseconds: step.intervalMilliseconds)
+                case .key:
+                    if let key = step.key, !key.isEmpty {
+                        poster.pressKey(key)
+                    }
+                    if isLastStep, isLastLoop {
+                        await emit(.finished(current: current, startedAt: clock.now()))
+                    } else {
+                        let next = nextMacroLabel(
+                            steps: steps,
+                            afterIndex: index,
+                            willLoop: !isLastLoop,
+                            loopInterval: settings.macroLoopIntervalMilliseconds
+                        )
+                        await emit(
+                            .waiting(
+                                current: current,
+                                next: next,
+                                waitMilliseconds: step.intervalMilliseconds,
+                                startedAt: clock.now()
+                            )
+                        )
+                    }
+                    await clock.sleep(milliseconds: step.intervalMilliseconds)
+                case .wait:
+                    if isLastStep, isLastLoop {
+                        await emit(.finished(current: current, startedAt: clock.now()))
+                    } else {
+                        let next = nextMacroLabel(
+                            steps: steps,
+                            afterIndex: index,
+                            willLoop: !isLastLoop,
+                            loopInterval: settings.macroLoopIntervalMilliseconds
+                        )
+                        await emit(
+                            .waiting(
+                                current: current,
+                                next: next,
+                                waitMilliseconds: step.waitMilliseconds,
+                                startedAt: clock.now()
+                            )
+                        )
+                    }
+                    await clock.sleep(milliseconds: step.waitMilliseconds)
+                }
             }
             loops += 1
             if loops < limit, !Task.isCancelled {
+                let first = RunLabels.macroStep(steps[0])
+                await emit(
+                    .waiting(
+                        current: "Loop pause",
+                        next: first,
+                        waitMilliseconds: settings.macroLoopIntervalMilliseconds,
+                        startedAt: clock.now()
+                    )
+                )
                 await clock.sleep(milliseconds: settings.macroLoopIntervalMilliseconds)
             }
         }
     }
 
-    private func performMacroStep(_ step: MacroStep) async {
-        switch step.kind {
-        case .click:
-            if let point = step.point {
-                poster.click(at: point.cgPoint, button: step.mouseButton)
-            }
-            await clock.sleep(milliseconds: step.intervalMilliseconds)
-        case .key:
-            if let key = step.key, !key.isEmpty {
-                poster.pressKey(key)
-            }
-            await clock.sleep(milliseconds: step.intervalMilliseconds)
-        case .wait:
-            await clock.sleep(milliseconds: step.waitMilliseconds)
+    private func nextMacroLabel(
+        steps: [MacroStep],
+        afterIndex: Int,
+        willLoop: Bool,
+        loopInterval: Int
+    ) -> String {
+        let nextIndex = afterIndex + 1
+        if nextIndex < steps.count {
+            return RunLabels.macroStep(steps[nextIndex])
         }
+        if willLoop {
+            return loopInterval > 0 ? "Loop pause" : RunLabels.macroStep(steps[0])
+        }
+        return "Done"
     }
 }

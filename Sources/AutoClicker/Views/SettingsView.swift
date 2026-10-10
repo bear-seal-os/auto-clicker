@@ -7,11 +7,66 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             about
             Divider()
+            overlay
+            Divider()
             updates
             Divider()
             permission
             Divider()
             links
+        }
+    }
+
+    private var overlay: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Run Overlay")
+                .font(.subheadline.weight(.semibold))
+            Toggle("Show overlay while running", isOn: $model.settings.overlay.isEnabled)
+                .font(.caption)
+            HStack {
+                Text("Corner")
+                    .font(.caption)
+                Spacer()
+                Picker("Corner", selection: $model.settings.overlay.corner) {
+                    ForEach(OverlayCorner.allCases) { corner in
+                        Text(corner.title).tag(corner)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .frame(width: 140)
+            }
+            HStack {
+                Text("Opacity")
+                    .font(.caption)
+                Slider(
+                    value: $model.settings.overlay.opacity,
+                    in: OverlaySettings.minimumOpacity...OverlaySettings.maximumOpacity
+                )
+                Text("\(Int((model.settings.overlay.opacity * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
+            HStack {
+                Text("Accent")
+                    .font(.caption)
+                Spacer()
+                Picker("Accent", selection: $model.settings.overlay.accent) {
+                    ForEach(OverlayAccent.allCases) { accent in
+                        Text(accent.title).tag(accent)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .frame(width: 140)
+            }
+            Text("Shows the current action, next action, and wait countdown. Click-through so it never blocks input.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

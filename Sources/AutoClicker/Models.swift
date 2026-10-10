@@ -177,6 +177,68 @@ struct MacroStep: Codable, Equatable, Identifiable, Hashable {
     }
 }
 
+enum OverlayCorner: String, Codable, CaseIterable, Identifiable {
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .topLeft: return "Top Left"
+        case .topRight: return "Top Right"
+        case .bottomLeft: return "Bottom Left"
+        case .bottomRight: return "Bottom Right"
+        }
+    }
+}
+
+enum OverlayAccent: String, Codable, CaseIterable, Identifiable {
+    case blue
+    case green
+    case orange
+    case red
+    case purple
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .blue: return "Blue"
+        case .green: return "Green"
+        case .orange: return "Orange"
+        case .red: return "Red"
+        case .purple: return "Purple"
+        }
+    }
+}
+
+struct OverlaySettings: Codable, Equatable {
+    var isEnabled: Bool
+    var corner: OverlayCorner
+    var opacity: Double
+    var accent: OverlayAccent
+
+    static let minimumOpacity = 0.4
+    static let maximumOpacity = 1.0
+    static let defaultOpacity = 0.9
+
+    static var `default`: OverlaySettings {
+        OverlaySettings(
+            isEnabled: true,
+            corner: .topRight,
+            opacity: defaultOpacity,
+            accent: .blue
+        )
+    }
+
+    mutating func clamp() {
+        opacity = min(Self.maximumOpacity, max(Self.minimumOpacity, opacity))
+    }
+}
+
 struct AppSettings: Codable, Equatable {
     var mode: AppMode
     var intervalMilliseconds: Int
@@ -189,6 +251,7 @@ struct AppSettings: Codable, Equatable {
     /// Pause between full macro repetitions.
     var macroLoopIntervalMilliseconds: Int
     var toggleHotkey: KeyChord
+    var overlay: OverlaySettings
 
     static let minimumInterval = 10
     static let defaultInterval = 100
@@ -208,7 +271,8 @@ struct AppSettings: Codable, Equatable {
                 keyCode: 8,
                 modifiers: UInt(NSEvent.ModifierFlags.control.rawValue | NSEvent.ModifierFlags.option.rawValue),
                 displayName: "⌃⌥C"
-            )
+            ),
+            overlay: .default
         )
     }
 
@@ -223,6 +287,7 @@ struct AppSettings: Codable, Equatable {
         case macroSteps
         case macroLoopIntervalMilliseconds
         case toggleHotkey
+        case overlay
     }
 
     init(
@@ -235,7 +300,8 @@ struct AppSettings: Codable, Equatable {
         keyChord: KeyChord,
         macroSteps: [MacroStep],
         macroLoopIntervalMilliseconds: Int,
-        toggleHotkey: KeyChord
+        toggleHotkey: KeyChord,
+        overlay: OverlaySettings = .default
     ) {
         self.mode = mode
         self.intervalMilliseconds = intervalMilliseconds
@@ -247,6 +313,7 @@ struct AppSettings: Codable, Equatable {
         self.macroSteps = macroSteps
         self.macroLoopIntervalMilliseconds = macroLoopIntervalMilliseconds
         self.toggleHotkey = toggleHotkey
+        self.overlay = overlay
     }
 
     init(from decoder: Decoder) throws {
@@ -264,6 +331,7 @@ struct AppSettings: Codable, Equatable {
             forKey: .macroLoopIntervalMilliseconds
         ) ?? Self.defaultInterval
         toggleHotkey = try container.decode(KeyChord.self, forKey: .toggleHotkey)
+        overlay = try container.decodeIfPresent(OverlaySettings.self, forKey: .overlay) ?? .default
     }
 
     func encode(to encoder: Encoder) throws {
@@ -278,12 +346,14 @@ struct AppSettings: Codable, Equatable {
         try container.encode(macroSteps, forKey: .macroSteps)
         try container.encode(macroLoopIntervalMilliseconds, forKey: .macroLoopIntervalMilliseconds)
         try container.encode(toggleHotkey, forKey: .toggleHotkey)
+        try container.encode(overlay, forKey: .overlay)
     }
 
     mutating func clamp() {
         intervalMilliseconds = max(Self.minimumInterval, intervalMilliseconds)
         macroLoopIntervalMilliseconds = max(0, macroLoopIntervalMilliseconds)
         repeatCount = max(1, repeatCount)
+        overlay.clamp()
         for index in macroSteps.indices {
             macroSteps[index].intervalMilliseconds = max(0, macroSteps[index].intervalMilliseconds)
             macroSteps[index].waitMilliseconds = max(0, macroSteps[index].waitMilliseconds)
