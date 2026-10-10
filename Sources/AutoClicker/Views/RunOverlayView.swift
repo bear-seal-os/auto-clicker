@@ -26,8 +26,9 @@ struct RunOverlayView: View {
 
     @ViewBuilder
     private func content(cue: RunCue) -> some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
-            let remaining = remainingMilliseconds(cue: cue, at: context.date)
+        TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { context in
+            let fraction = progressFraction(cue: cue, at: context.date)
+            let secondsLeft = remainingWholeSeconds(cue: cue, at: context.date)
             VStack(alignment: .leading, spacing: 6) {
                 Text(cue.currentLabel)
                     .font(.caption.weight(.semibold))
@@ -42,15 +43,18 @@ struct RunOverlayView: View {
                 }
                 .font(.caption2)
 
-                ProgressView(value: progress(cue: cue, remaining: remaining))
+                ProgressView(value: fraction)
                     .progressViewStyle(.linear)
                     .tint(accentColor)
                     .opacity(cue.waitMilliseconds > 0 ? 1 : 0)
+                    .animation(nil, value: fraction)
+                    .animation(nil, value: cue.startedAt)
 
-                Text(cue.waitMilliseconds > 0 ? formatMilliseconds(remaining) : " ")
+                Text(cue.waitMilliseconds > 0 ? "\(secondsLeft)s" : " ")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentTransition(.identity)
             }
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -72,23 +76,19 @@ struct RunOverlayView: View {
         }
     }
 
-    private func remainingMilliseconds(cue: RunCue, at date: Date) -> Int {
-        guard cue.waitMilliseconds > 0 else { return 0 }
-        let elapsed = date.timeIntervalSince(cue.startedAt) * 1000
-        return max(0, cue.waitMilliseconds - Int(elapsed.rounded(.down)))
-    }
-
-    private func progress(cue: RunCue, remaining: Int) -> Double {
+    private func progressFraction(cue: RunCue, at date: Date) -> Double {
         guard cue.waitMilliseconds > 0 else { return 1 }
-        let done = Double(cue.waitMilliseconds - remaining) / Double(cue.waitMilliseconds)
-        return min(1, max(0, done))
+        let duration = Double(cue.waitMilliseconds) / 1000
+        let elapsed = max(0, date.timeIntervalSince(cue.startedAt))
+        return min(1, max(0, elapsed / duration))
     }
 
-    private func formatMilliseconds(_ value: Int) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fs", Double(value) / 1000)
-        }
-        return "\(value)ms"
+    private func remainingWholeSeconds(cue: RunCue, at date: Date) -> Int {
+        guard cue.waitMilliseconds > 0 else { return 0 }
+        let duration = Double(cue.waitMilliseconds) / 1000
+        let remaining = max(0, duration - date.timeIntervalSince(cue.startedAt))
+        if remaining <= 0 { return 0 }
+        return max(1, Int(ceil(remaining)))
     }
 }
 

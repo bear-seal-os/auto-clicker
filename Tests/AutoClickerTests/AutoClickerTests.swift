@@ -513,3 +513,200 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertEqual(ReleaseFeed.lookup(from: Data("nope".utf8), currentVersion: "1.2.1"), .unreadable)
     }
 }
+
+final class ModePresetTests: XCTestCase {
+    private func baseSettings() -> AppSettings {
+        var settings = AppSettings.default
+        settings.intervalMilliseconds = 250
+        settings.mouseButton = .right
+        settings.repeatMode = .count
+        settings.repeatCount = 7
+        settings.clickPoint = ScreenPoint(x: 11, y: 22)
+        settings.keyChord = KeyChord(keyCode: 0, modifiers: 0, displayName: "A")
+        settings.macroSteps = [.wait(40)]
+        settings.macroLoopIntervalMilliseconds = 80
+        settings.toggleHotkey = KeyChord(keyCode: 9, modifiers: 262_144, displayName: "⌃V")
+        settings.overlay = OverlaySettings(
+            isEnabled: false,
+            corner: .bottomLeft,
+            opacity: 0.5,
+            accent: .red
+        )
+        return settings
+    }
+
+    func testCaptureAndApplyClickHereLeavesOtherTargetsAlone() {
+        var settings = baseSettings()
+        settings.mode = .clickHere
+        let preset = ModePreset.capture(name: "Here", from: settings)
+
+        var target = AppSettings.default
+        target.mode = .clickHere
+        target.toggleHotkey = settings.toggleHotkey
+        target.overlay = settings.overlay
+        target.clickPoint = ScreenPoint(x: 99, y: 88)
+        target.keyChord = KeyChord(keyCode: 1, modifiers: 0, displayName: "S")
+        target.macroSteps = [.wait(1)]
+        target.macroLoopIntervalMilliseconds = 999
+
+        preset.apply(to: &target)
+
+        XCTAssertEqual(target.intervalMilliseconds, 250)
+        XCTAssertEqual(target.mouseButton, .right)
+        XCTAssertEqual(target.repeatMode, .count)
+        XCTAssertEqual(target.repeatCount, 7)
+        XCTAssertEqual(target.clickPoint, ScreenPoint(x: 99, y: 88))
+        XCTAssertEqual(target.keyChord.displayName, "S")
+        XCTAssertEqual(target.macroSteps.count, 1)
+        XCTAssertEqual(target.macroSteps[0].kind, .wait)
+        XCTAssertEqual(target.macroSteps[0].waitMilliseconds, 1)
+        XCTAssertEqual(target.macroLoopIntervalMilliseconds, 999)
+        XCTAssertEqual(target.toggleHotkey, settings.toggleHotkey)
+        XCTAssertEqual(target.overlay, settings.overlay)
+    }
+
+    func testCaptureAndApplyClickPoint() {
+        var settings = baseSettings()
+        settings.mode = .clickPoint
+        let preset = ModePreset.capture(name: "Point", from: settings)
+
+        var target = AppSettings.default
+        target.mode = .clickPoint
+        target.keyChord = settings.keyChord
+        target.macroSteps = settings.macroSteps
+        preset.apply(to: &target)
+
+        XCTAssertEqual(target.clickPoint, ScreenPoint(x: 11, y: 22))
+        XCTAssertEqual(target.keyChord, settings.keyChord)
+        XCTAssertEqual(target.macroSteps, settings.macroSteps)
+    }
+
+    func testCaptureAndApplyKey() {
+        var settings = baseSettings()
+        settings.mode = .key
+        let preset = ModePreset.capture(name: "Key", from: settings)
+
+        var target = AppSettings.default
+        target.mode = .key
+        target.clickPoint = settings.clickPoint
+        preset.apply(to: &target)
+
+        XCTAssertEqual(target.keyChord, settings.keyChord)
+        XCTAssertEqual(target.clickPoint, settings.clickPoint)
+    }
+
+    func testCaptureAndApplyMacro() {
+        var settings = baseSettings()
+        settings.mode = .macro
+        settings.macroSteps = [
+            .click(ScreenPoint(x: 1, y: 2), button: .left),
+            .wait(15)
+        ]
+        settings.macroLoopIntervalMilliseconds = 33
+        let preset = ModePreset.capture(name: "Macro", from: settings)
+
+        var target = AppSettings.default
+        target.mode = .macro
+        target.clickPoint = ScreenPoint(x: 50, y: 60)
+        target.keyChord = settings.keyChord
+        preset.apply(to: &target)
+
+        XCTAssertEqual(target.macroSteps, settings.macroSteps)
+        XCTAssertEqual(target.macroLoopIntervalMilliseconds, 33)
+        XCTAssertEqual(target.clickPoint, ScreenPoint(x: 50, y: 60))
+        XCTAssertEqual(target.keyChord, settings.keyChord)
+    }
+
+    func testLibrarySaveRejectsBlankAndDuplicateNames() {
+        var library = PresetLibrary.empty
+        var settings = baseSettings()
+        settings.mode = .clickHere
+
+        XCTAssertThrowsError(try library.save(name: "  ", from: settings)) { error in
+            XCTAssertEqual(error as? PresetError, .blankName)
+        }
+        XCTAssertNoThrow(try library.save(name: "A", from: settings))
+        XCTAssertThrowsError(try library.save(name: "A", from: settings)) { error in
+            XCTAssertEqual(error as? PresetError, .duplicateName)
+        }
+        XCTAssertEqual(library.presets(for: .clickHere).count, 1)
+    }
+
+    func testLibraryUpdateRenameAndDelete() throws {
+        var library = PresetLibrary.empty
+        var settings = baseSettings()
+        settings.mode = .key
+        let id = try library.save(name: "Original", from: settings)
+
+        settings.intervalMilliseconds = 500
+        try library.update(id: id, from: settings)
+        XCTAssertEqual(library.presets(for: .key).first?.intervalMilliseconds, 500)
+
+        try library.rename(id: id, to: "Renamed")
+        XCTAssertEqual(library.presets(for: .key).first?.name, "Renamed")
+
+        XCTAssertThrowsError(try library.rename(id: id, to: "  ")) { error in
+            XCTAssertEqual(error as? PresetError, .blankName)
+        }
+
+        library.delete(id: id, mode: .key)
+        XCTAssertTrue(library.presets(for: .key).isEmpty)
+    }
+
+    func testPresetLibraryStorePersists() throws {
+        let defaults = UserDefaults(suiteName: "AutoClickerPresetTests.\(UUID().uuidString)")!
+        var library = PresetLibrary.empty
+        var settings = baseSettings()
+        settings.mode = .clickPoint
+        _ = try library.save(name: "P1", from: settings)
+        PresetLibraryStore.save(library, defaults: defaults)
+
+        let loaded = PresetLibraryStore.load(defaults: defaults)
+        XCTAssertEqual(loaded.presets(for: .clickPoint).count, 1)
+        XCTAssertEqual(loaded.presets(for: .clickPoint).first?.name, "P1")
+    }
+
+    func testPresetFileRoundTripAndImportMergesNames() throws {
+        var library = PresetLibrary.empty
+        var settings = baseSettings()
+        settings.mode = .macro
+        let firstID = try library.save(name: "Farm", from: settings)
+        settings.macroLoopIntervalMilliseconds = 12
+        _ = try library.save(name: "Boss", from: settings)
+
+        let file = PresetFile(mode: .macro, presets: library.presets(for: .macro))
+        let data = try JSONEncoder().encode(file)
+        let decoded = try PresetFile.decode(from: data)
+        XCTAssertEqual(decoded.mode, .macro)
+        XCTAssertEqual(decoded.presets.count, 2)
+
+        var target = PresetLibrary.empty
+        let existingID = try target.save(name: "Farm", from: settings)
+        let imported = try target.importPresets(from: decoded, into: .macro)
+        XCTAssertEqual(imported, 2)
+        let names = target.presets(for: .macro).map(\.name).sorted()
+        XCTAssertEqual(names, ["Boss", "Farm", "Farm 2"])
+        let importedIDs = Set(target.presets(for: .macro).map(\.id))
+        XCTAssertTrue(importedIDs.contains(existingID))
+        XCTAssertFalse(importedIDs.contains(firstID))
+        XCTAssertEqual(importedIDs.count, 3)
+    }
+
+    func testImportRejectsMismatchedModeAndBadFile() throws {
+        var library = PresetLibrary.empty
+        var settings = baseSettings()
+        settings.mode = .key
+        _ = try library.save(name: "K", from: settings)
+        let file = PresetFile(mode: .key, presets: library.presets(for: .key))
+
+        var target = PresetLibrary.empty
+        XCTAssertThrowsError(try target.importPresets(from: file, into: .clickHere)) { error in
+            XCTAssertEqual(error as? PresetError, .mismatchedMode)
+        }
+        XCTAssertTrue(target.presets(for: .clickHere).isEmpty)
+
+        XCTAssertThrowsError(try PresetFile.decode(from: Data("{}".utf8))) { error in
+            XCTAssertEqual(error as? PresetError, .invalidFile)
+        }
+    }
+}

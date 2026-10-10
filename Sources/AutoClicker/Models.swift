@@ -360,3 +360,254 @@ struct AppSettings: Codable, Equatable {
         }
     }
 }
+
+enum PresetError: Error, Equatable {
+    case blankName
+    case duplicateName
+    case notFound
+    case mismatchedMode
+    case invalidFile
+    case unsupportedVersion
+}
+
+enum ModePresetDetails: Codable, Equatable, Hashable {
+    case clickHere
+    case clickPoint(ScreenPoint)
+    case key(KeyChord)
+    case macro(steps: [MacroStep], loopIntervalMilliseconds: Int)
+
+    var mode: AppMode {
+        switch self {
+        case .clickHere: return .clickHere
+        case .clickPoint: return .clickPoint
+        case .key: return .key
+        case .macro: return .macro
+        }
+    }
+}
+
+struct ModePreset: Codable, Equatable, Identifiable, Hashable {
+    var id: UUID
+    var name: String
+    var intervalMilliseconds: Int
+    var mouseButton: MouseButton
+    var repeatMode: RepeatMode
+    var repeatCount: Int
+    var details: ModePresetDetails
+
+    var mode: AppMode { details.mode }
+
+    static func capture(name: String, from settings: AppSettings) -> ModePreset {
+        let details: ModePresetDetails
+        switch settings.mode {
+        case .clickHere:
+            details = .clickHere
+        case .clickPoint:
+            details = .clickPoint(settings.clickPoint)
+        case .key:
+            details = .key(settings.keyChord)
+        case .macro:
+            details = .macro(
+                steps: settings.macroSteps,
+                loopIntervalMilliseconds: settings.macroLoopIntervalMilliseconds
+            )
+        }
+        var preset = ModePreset(
+            id: UUID(),
+            name: name,
+            intervalMilliseconds: settings.intervalMilliseconds,
+            mouseButton: settings.mouseButton,
+            repeatMode: settings.repeatMode,
+            repeatCount: settings.repeatCount,
+            details: details
+        )
+        preset.clamp()
+        return preset
+    }
+
+    func apply(to settings: inout AppSettings) {
+        var copy = self
+        copy.clamp()
+        settings.intervalMilliseconds = copy.intervalMilliseconds
+        settings.mouseButton = copy.mouseButton
+        settings.repeatMode = copy.repeatMode
+        settings.repeatCount = copy.repeatCount
+        switch copy.details {
+        case .clickHere:
+            break
+        case .clickPoint(let point):
+            settings.clickPoint = point
+        case .key(let chord):
+            settings.keyChord = chord
+        case .macro(let steps, let loopInterval):
+            settings.macroSteps = steps
+            settings.macroLoopIntervalMilliseconds = loopInterval
+        }
+    }
+
+    mutating func clamp() {
+        intervalMilliseconds = max(AppSettings.minimumInterval, intervalMilliseconds)
+        repeatCount = max(1, repeatCount)
+        switch details {
+        case .clickHere, .clickPoint, .key:
+            break
+        case .macro(var steps, let loopInterval):
+            for index in steps.indices {
+                steps[index].intervalMilliseconds = max(0, steps[index].intervalMilliseconds)
+                steps[index].waitMilliseconds = max(0, steps[index].waitMilliseconds)
+            }
+            details = .macro(steps: steps, loopIntervalMilliseconds: max(0, loopInterval))
+        }
+    }
+}
+
+struct PresetLibrary: Codable, Equatable {
+    var clickHere: [ModePreset]
+    var clickPoint: [ModePreset]
+    var key: [ModePreset]
+    var macro: [ModePreset]
+
+    static var empty: PresetLibrary {
+        PresetLibrary(clickHere: [], clickPoint: [], key: [], macro: [])
+    }
+
+    func presets(for mode: AppMode) -> [ModePreset] {
+        switch mode {
+        case .clickHere: return clickHere
+        case .clickPoint: return clickPoint
+        case .key: return key
+        case .macro: return macro
+        }
+    }
+
+    mutating func setPresets(_ presets: [ModePreset], for mode: AppMode) {
+        switch mode {
+        case .clickHere: clickHere = presets
+        case .clickPoint: clickPoint = presets
+        case .key: key = presets
+        case .macro: macro = presets
+        }
+    }
+
+    mutating func clamp() {
+        for mode in AppMode.allCases {
+            var presets = presets(for: mode)
+            for index in presets.indices {
+                presets[index].clamp()
+            }
+            setPresets(presets, for: mode)
+        }
+    }
+
+    @discardableResult
+    mutating func save(name: String, from settings: AppSettings) throws -> UUID {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw PresetError.blankName }
+        let mode = settings.mode
+        guard !presets(for: mode).contains(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
+            throw PresetError.duplicateName
+        }
+        var preset = ModePreset.capture(name: trimmed, from: settings)
+        preset.name = trimmed
+        var list = presets(for: mode)
+        list.append(preset)
+        setPresets(list, for: mode)
+        return preset.id
+    }
+
+    mutating func update(id: UUID, from settings: AppSettings) throws {
+        let mode = settings.mode
+        var list = presets(for: mode)
+        guard let index = list.firstIndex(where: { $0.id == id }) else {
+            throw PresetError.notFound
+        }
+        let name = list[index].name
+        var preset = ModePreset.capture(name: name, from: settings)
+        preset.id = id
+        preset.name = name
+        list[index] = preset
+        setPresets(list, for: mode)
+    }
+
+    mutating func rename(id: UUID, to name: String) throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw PresetError.blankName }
+        for mode in AppMode.allCases {
+            var list = presets(for: mode)
+            guard let index = list.firstIndex(where: { $0.id == id }) else { continue }
+            guard !list.contains(where: {
+                $0.id != id && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+            }) else {
+                throw PresetError.duplicateName
+            }
+            list[index].name = trimmed
+            setPresets(list, for: mode)
+            return
+        }
+        throw PresetError.notFound
+    }
+
+    mutating func delete(id: UUID, mode: AppMode) {
+        var list = presets(for: mode)
+        list.removeAll { $0.id == id }
+        setPresets(list, for: mode)
+    }
+
+    @discardableResult
+    mutating func importPresets(from file: PresetFile, into mode: AppMode) throws -> Int {
+        guard file.mode == mode else { throw PresetError.mismatchedMode }
+        var list = presets(for: mode)
+        for imported in file.presets {
+            var preset = imported
+            preset.id = UUID()
+            preset.name = Self.uniqueName(preset.name, among: list)
+            preset.clamp()
+            list.append(preset)
+        }
+        setPresets(list, for: mode)
+        return file.presets.count
+    }
+
+    static func uniqueName(_ base: String, among presets: [ModePreset]) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let seed = trimmed.isEmpty ? "Preset" : trimmed
+        func taken(_ name: String) -> Bool {
+            presets.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        if !taken(seed) { return seed }
+        var suffix = 2
+        while taken("\(seed) \(suffix)") {
+            suffix += 1
+        }
+        return "\(seed) \(suffix)"
+    }
+}
+
+struct PresetFile: Codable, Equatable {
+    static let formatID = "autoclicker.presets"
+    static let currentVersion = 1
+
+    var format: String
+    var version: Int
+    var mode: AppMode
+    var presets: [ModePreset]
+
+    init(mode: AppMode, presets: [ModePreset]) {
+        self.format = Self.formatID
+        self.version = Self.currentVersion
+        self.mode = mode
+        self.presets = presets
+    }
+
+    static func decode(from data: Data) throws -> PresetFile {
+        let file: PresetFile
+        do {
+            file = try JSONDecoder().decode(PresetFile.self, from: data)
+        } catch {
+            throw PresetError.invalidFile
+        }
+        guard file.format == formatID else { throw PresetError.invalidFile }
+        guard file.version == currentVersion else { throw PresetError.unsupportedVersion }
+        return file
+    }
+}

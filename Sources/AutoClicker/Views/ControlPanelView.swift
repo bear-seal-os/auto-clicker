@@ -20,6 +20,8 @@ struct ControlPanelView: View {
             if showsSettings {
                 SettingsView()
             } else {
+                PresetBarView()
+                Divider()
                 sharedControls
                 modeSpecificControls
                 Divider()

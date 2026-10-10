@@ -7,6 +7,11 @@ final class AppModel: ObservableObject {
     @Published var settings: AppSettings {
         didSet { persistAndRefreshHotkey() }
     }
+    @Published var presetLibrary: PresetLibrary {
+        didSet { PresetLibraryStore.save(presetLibrary) }
+    }
+    /// Session-only selection per mode; not persisted.
+    @Published var selectedPresetIDs: [AppMode: UUID] = [:]
     @Published var isRunning = false
     @Published var isPickingPoint = false
     @Published var hasAccessibility = false
@@ -28,8 +33,10 @@ final class AppModel: ObservableObject {
     init(poster: InputPosting = InputPoster(), settings: AppSettings? = nil) {
         self.poster = poster
         self.runner = ActionRunner(poster: poster)
-        self.settings = settings ?? SettingsStore.load()
-        self.settings.clamp()
+        var loaded = settings ?? SettingsStore.load()
+        loaded.clamp()
+        self.settings = loaded
+        self.presetLibrary = PresetLibraryStore.load()
         if Bundle.main.bundleURL.pathExtension == "app" {
             AccessibilityPermission.resetStaleGrantIfNeeded()
         }
@@ -44,6 +51,122 @@ final class AppModel: ObservableObject {
             Task { await checkForUpdate() }
         }
         overlayController.bind(to: self)
+    }
+
+    var canManagePresets: Bool {
+        !isRunning && !isPickingPoint && !hasInvalidNumericInput
+    }
+
+    var selectedPresetID: UUID? {
+        get { selectedPresetIDs[settings.mode] }
+        set { selectedPresetIDs[settings.mode] = newValue }
+    }
+
+    func presetsForCurrentMode() -> [ModePreset] {
+        presetLibrary.presets(for: settings.mode)
+    }
+
+    func selectPreset(id: UUID?) {
+        guard canManagePresets else { return }
+        guard let id else {
+            selectedPresetID = nil
+            return
+        }
+        guard let preset = presetsForCurrentMode().first(where: { $0.id == id }) else { return }
+        selectedPresetID = id
+        preset.apply(to: &settings)
+        statusMessage = "Loaded preset “\(preset.name)”."
+    }
+
+    @discardableResult
+    func savePreset(named name: String) -> Bool {
+        guard canManagePresets else { return false }
+        do {
+            let id = try presetLibrary.save(name: name, from: settings)
+            selectedPresetID = id
+            statusMessage = "Saved preset “\(name.trimmingCharacters(in: .whitespacesAndNewlines))”."
+            return true
+        } catch PresetError.blankName {
+            statusMessage = "Preset name can’t be empty."
+            return false
+        } catch PresetError.duplicateName {
+            statusMessage = "A preset with that name already exists."
+            return false
+        } catch {
+            statusMessage = "Couldn’t save preset."
+            return false
+        }
+    }
+
+    @discardableResult
+    func updateSelectedPreset() -> Bool {
+        guard canManagePresets, let id = selectedPresetID else { return false }
+        do {
+            try presetLibrary.update(id: id, from: settings)
+            let name = presetsForCurrentMode().first(where: { $0.id == id })?.name ?? "preset"
+            statusMessage = "Updated “\(name)”."
+            return true
+        } catch {
+            statusMessage = "Couldn’t update preset."
+            return false
+        }
+    }
+
+    @discardableResult
+    func renameSelectedPreset(to name: String) -> Bool {
+        guard canManagePresets, let id = selectedPresetID else { return false }
+        do {
+            try presetLibrary.rename(id: id, to: name)
+            statusMessage = "Renamed preset to “\(name.trimmingCharacters(in: .whitespacesAndNewlines))”."
+            return true
+        } catch PresetError.blankName {
+            statusMessage = "Preset name can’t be empty."
+            return false
+        } catch PresetError.duplicateName {
+            statusMessage = "A preset with that name already exists."
+            return false
+        } catch {
+            statusMessage = "Couldn’t rename preset."
+            return false
+        }
+    }
+
+    func deleteSelectedPreset() {
+        guard canManagePresets, let id = selectedPresetID else { return }
+        let name = presetsForCurrentMode().first(where: { $0.id == id })?.name
+        presetLibrary.delete(id: id, mode: settings.mode)
+        selectedPresetID = nil
+        if let name {
+            statusMessage = "Deleted preset “\(name)”."
+        }
+    }
+
+    func exportPresetsFile() -> PresetFile? {
+        let presets = presetsForCurrentMode()
+        guard !presets.isEmpty else { return nil }
+        return PresetFile(mode: settings.mode, presets: presets)
+    }
+
+    @discardableResult
+    func importPresets(from data: Data) -> Bool {
+        guard canManagePresets else { return false }
+        do {
+            let file = try PresetFile.decode(from: data)
+            let count = try presetLibrary.importPresets(from: file, into: settings.mode)
+            statusMessage = count == 1
+                ? "Imported 1 preset."
+                : "Imported \(count) presets."
+            return true
+        } catch PresetError.mismatchedMode {
+            statusMessage = "That file is for a different tab."
+            return false
+        } catch PresetError.unsupportedVersion {
+            statusMessage = "That preset file version isn’t supported."
+            return false
+        } catch {
+            statusMessage = "Couldn’t import presets."
+            return false
+        }
     }
 
     func shutdown() {
