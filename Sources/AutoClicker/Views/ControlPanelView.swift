@@ -99,6 +99,8 @@ struct ControlPanelView: View {
                         Text(button.title).tag(button)
                     }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
                 .frame(width: 100)
                 .disabled(model.settings.mode == .key || model.isRunning)
             }
@@ -111,6 +113,8 @@ struct ControlPanelView: View {
                         Text(mode.title).tag(mode)
                     }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
                 .frame(width: 140)
                 .disabled(model.isRunning)
 

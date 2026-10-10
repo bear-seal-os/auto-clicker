@@ -23,6 +23,11 @@ struct PresetExportDocument: FileDocument {
     }
 }
 
+private enum PresetPickerChoice: Hashable {
+    case none
+    case preset(UUID)
+}
+
 struct PresetBarView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -38,10 +43,22 @@ struct PresetBarView: View {
         model.presetsForCurrentMode()
     }
 
-    private var selection: Binding<UUID?> {
+    private var selection: Binding<PresetPickerChoice> {
         Binding(
-            get: { model.selectedPresetID },
-            set: { model.selectPreset(id: $0) }
+            get: {
+                if let id = model.selectedPresetID {
+                    return .preset(id)
+                }
+                return .none
+            },
+            set: { choice in
+                switch choice {
+                case .none:
+                    model.selectPreset(id: nil)
+                case .preset(let id):
+                    model.selectPreset(id: id)
+                }
+            }
         )
     }
 
@@ -53,14 +70,22 @@ struct PresetBarView: View {
             Text("Presets")
                 .font(.subheadline.weight(.semibold))
 
-            Picker("Preset", selection: selection) {
-                Text("None").tag(UUID?.none)
-                ForEach(presets) { preset in
-                    Text(preset.name).tag(Optional(preset.id))
+            HStack {
+                Text("Preset")
+                    .font(.caption)
+                Spacer()
+                Picker("Preset", selection: selection) {
+                    Text("None").tag(PresetPickerChoice.none)
+                    ForEach(presets) { preset in
+                        Text(preset.name).tag(PresetPickerChoice.preset(preset.id))
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .frame(maxWidth: 220, alignment: .trailing)
+                .disabled(!canManage)
             }
-            .labelsHidden()
-            .disabled(!canManage)
 
             HStack(spacing: 6) {
                 Button("Save") {

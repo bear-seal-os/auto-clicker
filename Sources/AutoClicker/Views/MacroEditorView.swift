@@ -154,6 +154,7 @@ struct MacroStepRow: View {
                         }
                     }
                     .labelsHidden()
+                    .pickerStyle(.menu)
                     .frame(width: 72)
                     Button("Pick") {
                         model.pickPointForMacroStep(id: stepID)
