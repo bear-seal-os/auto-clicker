@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+enum PanelLayout {
+    static let width: CGFloat = 460
+    /// Same outer size for the menu-bar panel and the Dock window.
+    static let height: CGFloat = 520
+}
+
 private enum PanelSection: Hashable {
     case mode(AppMode)
     case settings
@@ -30,26 +36,18 @@ struct ControlPanelView: View {
                         hotkeySection
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(.trailing, 2)
             }
-            // Explicit height: `maxHeight` alone collapses ScrollView content
-            // inside MenuBarExtra to an empty gap.
-            .frame(width: 432, height: Self.scrollHeight, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             if !showsSettings {
                 Divider()
                 footer
             }
         }
         .padding(14)
-        .frame(width: 460)
-        .fixedSize(horizontal: true, vertical: true)
+        .frame(width: PanelLayout.width, height: PanelLayout.height, alignment: .top)
         .background(PinHostWindowToTop())
-    }
-
-    private static var scrollHeight: CGFloat {
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        return min(360, max(220, screenHeight * 0.38))
     }
 
     private var section: Binding<PanelSection> {

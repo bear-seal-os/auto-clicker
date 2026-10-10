@@ -34,11 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: host)
         window.title = "Auto Clicker"
         window.isReleasedWhenClosed = false
-        host.view.layoutSubtreeIfNeeded()
-        let fitting = host.view.fittingSize
-        if fitting.width > 1, fitting.height > 1 {
-            window.setContentSize(fitting)
-        }
+        window.setContentSize(NSSize(width: PanelLayout.width, height: PanelLayout.height))
+        window.styleMask.remove(.resizable)
         self.window = window
         window.makeKeyAndOrderFront(nil)
         PanelWindowAnchor.pinNearTop(window)

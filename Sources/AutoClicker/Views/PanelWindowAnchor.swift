@@ -12,7 +12,7 @@ enum PanelWindowAnchor {
     static func apply(to window: NSWindow) {
         guard let screen = window.screen ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
-        var frame = window.frame
+        let frame = window.frame
         guard frame.width > 1, frame.height > 1 else { return }
 
         let margin: CGFloat = 10
