@@ -31,8 +31,11 @@ struct ControlPanelView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 2)
             }
-            .frame(maxHeight: Self.scrollMaxHeight)
+            // Explicit height: `maxHeight` alone collapses ScrollView content
+            // inside MenuBarExtra to an empty gap.
+            .frame(width: 432, height: Self.scrollHeight, alignment: .top)
             if !showsSettings {
                 Divider()
                 footer
@@ -40,19 +43,13 @@ struct ControlPanelView: View {
         }
         .padding(14)
         .frame(width: 460)
-        .frame(maxHeight: Self.panelMaxHeight)
+        .fixedSize(horizontal: true, vertical: true)
         .background(PinHostWindowToTop())
     }
 
-    /// Hard cap so the menu-bar panel stays under the menu bar instead of
-    /// being recentered mid-screen by the system.
-    private static var panelMaxHeight: CGFloat {
+    private static var scrollHeight: CGFloat {
         let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        return min(520, max(320, screenHeight * 0.55))
-    }
-
-    private static var scrollMaxHeight: CGFloat {
-        max(180, panelMaxHeight - 170)
+        return min(360, max(220, screenHeight * 0.38))
     }
 
     private var section: Binding<PanelSection> {
