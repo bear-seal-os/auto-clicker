@@ -40,9 +40,10 @@ final class ActionRunner {
         task = Task { [weak self] in
             guard let self else { return }
             await self.run(settings: snapshot)
+            let finishedCue = self.onCue
+            self.onCue = nil
             await MainActor.run {
-                self.publishCue(nil)
-                self.onCue = nil
+                finishedCue?(nil)
                 self.isRunning = false
                 onFinished()
             }
@@ -55,19 +56,15 @@ final class ActionRunner {
         isRunning = false
         let clear = onCue
         onCue = nil
-        DispatchQueue.main.async {
+        Task { @MainActor in
             clear?(nil)
         }
     }
 
-    @MainActor
-    private func publishCue(_ cue: RunCue?) {
-        onCue?(cue)
-    }
-
-    private func emit(_ cue: RunCue) async {
+    private func emit(_ cue: RunCue?) async {
+        let callback = onCue
         await MainActor.run {
-            self.publishCue(cue)
+            callback?(cue)
         }
     }
 
