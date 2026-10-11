@@ -10,8 +10,19 @@ protocol InputPosting: AnyObject {
     func currentMouseLocation() -> CGPoint
 }
 
+enum PointerMotion {
+    static func needsMove(from origin: CGPoint, to point: CGPoint) -> Bool {
+        abs(point.x - origin.x) > 1 || abs(point.y - origin.y) > 1
+    }
+}
+
 final class InputPoster: InputPosting {
     private var nextMouseEventNumber: Int64 = 0
+    private let source: CGEventSource? = {
+        let source = CGEventSource(stateID: .hidSystemState)
+        source?.localEventsSuppressionInterval = 0
+        return source
+    }()
 
     func click(at point: CGPoint, button: MouseButton) {
         let (downType, upType, cgButton): (CGEventType, CGEventType, CGMouseButton) = {
@@ -23,25 +34,24 @@ final class InputPoster: InputPosting {
             }
         }()
 
-        let source = CGEventSource(stateID: .hidSystemState)
-        source?.localEventsSuppressionInterval = 0
+        let source = eventSource()
 
         let origin = currentMouseLocation()
-        CGWarpMouseCursorPosition(point)
-        CGAssociateMouseAndMouseCursorPosition(1)
+        if PointerMotion.needsMove(from: origin, to: point) {
+            CGWarpMouseCursorPosition(point)
+            CGAssociateMouseAndMouseCursorPosition(1)
 
-        // Warping updates the system pointer and does not deliver a move.
-        // Roblox only clicks a control it has already hovered.
-        if let moved = CGEvent(
-            mouseEventSource: source,
-            mouseType: .mouseMoved,
-            mouseCursorPosition: point,
-            mouseButton: .left
-        ) {
-            moved.setIntegerValueField(.mouseEventDeltaX, value: Int64((point.x - origin.x).rounded()))
-            moved.setIntegerValueField(.mouseEventDeltaY, value: Int64((point.y - origin.y).rounded()))
-            post(moved)
-            if abs(point.x - origin.x) > 1 || abs(point.y - origin.y) > 1 {
+            // Warping updates the system pointer and does not deliver a move.
+            // Roblox only clicks a control it has already hovered.
+            if let moved = CGEvent(
+                mouseEventSource: source,
+                mouseType: .mouseMoved,
+                mouseCursorPosition: point,
+                mouseButton: .left
+            ) {
+                moved.setIntegerValueField(.mouseEventDeltaX, value: Int64((point.x - origin.x).rounded()))
+                moved.setIntegerValueField(.mouseEventDeltaY, value: Int64((point.y - origin.y).rounded()))
+                post(moved)
                 usleep(20_000)
             }
         }
@@ -69,6 +79,11 @@ final class InputPoster: InputPosting {
         post(up)
     }
 
+    private func eventSource() -> CGEventSource? {
+        source?.localEventsSuppressionInterval = 0
+        return source
+    }
+
     private func post(_ event: CGEvent) {
         PostedMouseEvent.prepare(event, eventNumber: nextEventNumber())
         event.post(tap: .cghidEventTap)
@@ -81,15 +96,18 @@ final class InputPoster: InputPosting {
 
     func pressKey(_ chord: KeyChord) {
         let flags = cgEventFlags(from: chord.modifiers)
+        let source = eventSource()
 
-        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(chord.keyCode), keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(chord.keyCode), keyDown: false) else {
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(chord.keyCode), keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(chord.keyCode), keyDown: false) else {
             return
         }
 
         down.flags = flags
         up.flags = flags
+        down.timestamp = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         down.post(tap: .cghidEventTap)
+        up.timestamp = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         up.post(tap: .cghidEventTap)
     }
 

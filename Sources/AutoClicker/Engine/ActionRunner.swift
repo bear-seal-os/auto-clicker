@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 protocol Clock {
@@ -5,13 +6,46 @@ protocol Clock {
     func sleep(milliseconds: Int) async
 }
 
+enum IntervalTiming {
+    static func remainingMilliseconds(interval: Int, elapsed: TimeInterval) -> Int {
+        let elapsedMs = Int((elapsed * 1000).rounded())
+        return max(0, interval - max(0, elapsedMs))
+    }
+}
+
+enum PreciseWait {
+    private static let timebase: mach_timebase_info_data_t = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return info
+    }()
+
+    static func sleep(milliseconds: Int) async {
+        var left = max(0, milliseconds)
+        while left > 0 {
+            if Task.isCancelled { return }
+            let chunk = left > 100 ? 100 : left
+            await block(milliseconds: chunk)
+            left -= chunk
+        }
+    }
+
+    private static func block(milliseconds: Int) async {
+        let ticks = UInt64(milliseconds) * 1_000_000 * UInt64(timebase.denom) / UInt64(timebase.numer)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInteractive).async {
+                mach_wait_until(mach_absolute_time() &+ ticks)
+                continuation.resume()
+            }
+        }
+    }
+}
+
 struct SystemClock: Clock {
     func now() -> Date { Date() }
 
     func sleep(milliseconds: Int) async {
-        let clamped = max(0, milliseconds)
-        if clamped == 0 { return }
-        try? await Task.sleep(nanoseconds: UInt64(clamped) * 1_000_000)
+        await PreciseWait.sleep(milliseconds: milliseconds)
     }
 }
 
@@ -19,7 +53,8 @@ final class ActionRunner {
     private let poster: InputPosting
     private let clock: Clock
     private var task: Task<Void, Never>?
-    private var onCue: ((RunCue?) -> Void)?
+    private var onCue: (@MainActor (RunCue?) -> Void)?
+    private var activity: NSObjectProtocol?
 
     private(set) var isRunning = false
 
@@ -30,14 +65,15 @@ final class ActionRunner {
 
     func start(
         settings: AppSettings,
-        onCue: ((RunCue?) -> Void)? = nil,
+        onCue: (@MainActor (RunCue?) -> Void)? = nil,
         onFinished: @escaping @MainActor () -> Void
     ) {
         stop()
         isRunning = true
         self.onCue = onCue
         let snapshot = settings
-        task = Task { [weak self] in
+        beginActivity()
+        task = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             await self.run(settings: snapshot)
             let finishedCue = self.onCue
@@ -47,6 +83,7 @@ final class ActionRunner {
                 self.isRunning = false
                 onFinished()
             }
+            self.endActivity()
         }
     }
 
@@ -56,9 +93,31 @@ final class ActionRunner {
         isRunning = false
         let clear = onCue
         onCue = nil
+        endActivity()
         Task { @MainActor in
             clear?(nil)
         }
+    }
+
+    private func beginActivity() {
+        guard activity == nil else { return }
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "Repeating clicks and keys"
+        )
+    }
+
+    private func endActivity() {
+        guard let activity else { return }
+        ProcessInfo.processInfo.endActivity(activity)
+        self.activity = nil
+    }
+
+    private func pause(for milliseconds: Int, since started: Date) async {
+        let elapsed = clock.now().timeIntervalSince(started)
+        let remaining = IntervalTiming.remainingMilliseconds(interval: milliseconds, elapsed: elapsed)
+        guard remaining > 0 else { return }
+        await clock.sleep(milliseconds: remaining)
     }
 
     private func emit(_ cue: RunCue?) async {
@@ -83,11 +142,13 @@ final class ActionRunner {
         let label = RunLabels.intervalAction(settings)
 
         while !Task.isCancelled && performed < limit {
-            performTick(settings: settings)
-            performed += 1
-            if performed >= limit || Task.isCancelled {
+            let started = clock.now()
+            let index = performed + 1
+            if index >= limit {
+                performTick(settings: settings)
+                performed += 1
                 if !Task.isCancelled {
-                    await emit(.finished(current: label, startedAt: clock.now()))
+                    await emit(.finished(current: label, actionIndex: performed, startedAt: started))
                 }
                 break
             }
@@ -96,10 +157,14 @@ final class ActionRunner {
                     current: label,
                     next: label,
                     waitMilliseconds: settings.intervalMilliseconds,
-                    startedAt: clock.now()
+                    actionIndex: index,
+                    startedAt: started
                 )
             )
-            await clock.sleep(milliseconds: settings.intervalMilliseconds)
+            if Task.isCancelled { return }
+            performTick(settings: settings)
+            performed += 1
+            await pause(for: settings.intervalMilliseconds, since: started)
         }
     }
 
@@ -121,6 +186,7 @@ final class ActionRunner {
         guard !settings.macroSteps.isEmpty else { return }
         let limit = settings.repeatMode == .count ? settings.repeatCount : Int.max
         var loops = 0
+        var actionIndex = 0
         let steps = settings.macroSteps
 
         while !Task.isCancelled && loops < limit {
@@ -130,89 +196,65 @@ final class ActionRunner {
                 let current = RunLabels.macroStep(step)
                 let isLastStep = index == steps.count - 1
                 let isLastLoop = loops + 1 >= limit
+                let wait = step.kind == .wait ? step.waitMilliseconds : step.intervalMilliseconds
+                actionIndex += 1
+                let started = clock.now()
 
-                switch step.kind {
-                case .click:
-                    if let point = step.point {
-                        poster.click(at: point.cgPoint, button: step.mouseButton)
-                    }
-                    if isLastStep, isLastLoop {
-                        await emit(.finished(current: current, startedAt: clock.now()))
-                    } else {
-                        let next = nextMacroLabel(
-                            steps: steps,
-                            afterIndex: index,
-                            willLoop: !isLastLoop,
-                            loopInterval: settings.macroLoopIntervalMilliseconds
+                if isLastStep, isLastLoop {
+                    performMacroStep(step)
+                    await emit(.finished(current: current, actionIndex: actionIndex, startedAt: started))
+                } else {
+                    let next = nextMacroLabel(
+                        steps: steps,
+                        afterIndex: index,
+                        willLoop: !isLastLoop,
+                        loopInterval: settings.macroLoopIntervalMilliseconds
+                    )
+                    await emit(
+                        .waiting(
+                            current: current,
+                            next: next,
+                            waitMilliseconds: wait,
+                            actionIndex: actionIndex,
+                            startedAt: started
                         )
-                        await emit(
-                            .waiting(
-                                current: current,
-                                next: next,
-                                waitMilliseconds: step.intervalMilliseconds,
-                                startedAt: clock.now()
-                            )
-                        )
-                    }
-                    await clock.sleep(milliseconds: step.intervalMilliseconds)
-                case .key:
-                    if let key = step.key, !key.isEmpty {
-                        poster.pressKey(key)
-                    }
-                    if isLastStep, isLastLoop {
-                        await emit(.finished(current: current, startedAt: clock.now()))
-                    } else {
-                        let next = nextMacroLabel(
-                            steps: steps,
-                            afterIndex: index,
-                            willLoop: !isLastLoop,
-                            loopInterval: settings.macroLoopIntervalMilliseconds
-                        )
-                        await emit(
-                            .waiting(
-                                current: current,
-                                next: next,
-                                waitMilliseconds: step.intervalMilliseconds,
-                                startedAt: clock.now()
-                            )
-                        )
-                    }
-                    await clock.sleep(milliseconds: step.intervalMilliseconds)
-                case .wait:
-                    if isLastStep, isLastLoop {
-                        await emit(.finished(current: current, startedAt: clock.now()))
-                    } else {
-                        let next = nextMacroLabel(
-                            steps: steps,
-                            afterIndex: index,
-                            willLoop: !isLastLoop,
-                            loopInterval: settings.macroLoopIntervalMilliseconds
-                        )
-                        await emit(
-                            .waiting(
-                                current: current,
-                                next: next,
-                                waitMilliseconds: step.waitMilliseconds,
-                                startedAt: clock.now()
-                            )
-                        )
-                    }
-                    await clock.sleep(milliseconds: step.waitMilliseconds)
+                    )
+                    if Task.isCancelled { return }
+                    performMacroStep(step)
                 }
+                await pause(for: wait, since: started)
             }
             loops += 1
             if loops < limit, !Task.isCancelled {
+                actionIndex += 1
                 let first = RunLabels.macroStep(steps[0])
+                let started = clock.now()
                 await emit(
                     .waiting(
                         current: "Loop pause",
                         next: first,
                         waitMilliseconds: settings.macroLoopIntervalMilliseconds,
-                        startedAt: clock.now()
+                        actionIndex: actionIndex,
+                        startedAt: started
                     )
                 )
-                await clock.sleep(milliseconds: settings.macroLoopIntervalMilliseconds)
+                await pause(for: settings.macroLoopIntervalMilliseconds, since: started)
             }
+        }
+    }
+
+    private func performMacroStep(_ step: MacroStep) {
+        switch step.kind {
+        case .click:
+            if let point = step.point {
+                poster.click(at: point.cgPoint, button: step.mouseButton)
+            }
+        case .key:
+            if let key = step.key, !key.isEmpty {
+                poster.pressKey(key)
+            }
+        case .wait:
+            break
         }
     }
 

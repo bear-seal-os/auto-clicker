@@ -13,8 +13,12 @@ final class FakePoster: InputPosting {
     var clicks: [Click] = []
     var keys: [KeyChord] = []
     var mouseLocation = CGPoint(x: 10, y: 20)
+    var onClick: (() -> Void)?
+    private(set) var clickedOnMainThread: Bool?
 
     func click(at point: CGPoint, button: MouseButton) {
+        clickedOnMainThread = Thread.isMainThread
+        onClick?()
         clicks.append(Click(point: point, button: button))
     }
 
@@ -28,13 +32,19 @@ final class FakePoster: InputPosting {
 }
 
 final class ControllableClock: Clock {
+    private(set) var current = Date(timeIntervalSince1970: 1_700_000_000)
     private(set) var sleepCalls: [Int] = []
     var sleepHandler: ((Int) async -> Void)?
 
-    func now() -> Date { Date() }
+    func now() -> Date { current }
+
+    func advance(seconds: TimeInterval) {
+        current = current.addingTimeInterval(seconds)
+    }
 
     func sleep(milliseconds: Int) async {
         sleepCalls.append(milliseconds)
+        current = current.addingTimeInterval(Double(milliseconds) / 1000)
         if let sleepHandler {
             await sleepHandler(milliseconds)
         }
@@ -200,6 +210,47 @@ final class ActionRunnerTests: XCTestCase {
         XCTAssertEqual(clock.sleepCalls, [10])
     }
 
+    @MainActor
+    func testIntervalClicksDoNotBlockTheMainThread() async {
+        let poster = FakePoster()
+        let clock = ControllableClock()
+        let runner = ActionRunner(poster: poster, clock: clock)
+
+        var settings = AppSettings.default
+        settings.mode = .clickHere
+        settings.repeatMode = .count
+        settings.repeatCount = 1
+
+        let finished = expectation(description: "finished")
+        runner.start(settings: settings) {
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+
+        XCTAssertEqual(poster.clickedOnMainThread, false)
+    }
+
+    func testIntervalSleepSubtractsTimeSpentClicking() async {
+        let poster = FakePoster()
+        let clock = ControllableClock()
+        poster.onClick = { clock.advance(seconds: 0.04) }
+        let runner = ActionRunner(poster: poster, clock: clock)
+
+        var settings = AppSettings.default
+        settings.mode = .clickHere
+        settings.repeatMode = .count
+        settings.repeatCount = 2
+        settings.intervalMilliseconds = 100
+
+        let finished = expectation(description: "finished")
+        runner.start(settings: settings) {
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+
+        XCTAssertEqual(clock.sleepCalls, [60])
+    }
+
     func testClickPointUsesSavedPoint() async {
         let poster = FakePoster()
         let clock = ControllableClock()
@@ -349,6 +400,30 @@ final class ActionRunnerTests: XCTestCase {
         XCTAssertEqual(cues[1].currentLabel, "Left click")
         XCTAssertEqual(cues[1].nextLabel, "Done")
         XCTAssertEqual(cues[1].waitMilliseconds, 0)
+        XCTAssertEqual(cues.map(\.actionIndex), [1, 2])
+    }
+
+    func testMacroSleepSubtractsTimeSpentClicking() async {
+        let poster = FakePoster()
+        let clock = ControllableClock()
+        poster.onClick = { clock.advance(seconds: 0.03) }
+        let runner = ActionRunner(poster: poster, clock: clock)
+
+        var settings = AppSettings.default
+        settings.mode = .macro
+        settings.repeatMode = .count
+        settings.repeatCount = 1
+        settings.macroSteps = [
+            .click(ScreenPoint(x: 1, y: 2), button: .left, intervalMilliseconds: 50)
+        ]
+
+        let finished = expectation(description: "finished")
+        runner.start(settings: settings) {
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+
+        XCTAssertEqual(clock.sleepCalls, [20])
     }
 
     func testMacroPublishesStepAndLoopCues() async {
@@ -409,6 +484,62 @@ final class RunLabelsTests: XCTestCase {
         XCTAssertEqual(RunLabels.intervalAction(settings), "Space")
 
         XCTAssertEqual(RunLabels.macroStep(.wait(10)), "Wait")
+    }
+}
+
+final class OverlayReadoutTests: XCTestCase {
+    func testCurrentLineIncludesActionIndex() {
+        XCTAssertEqual(OverlayReadout.currentLine(label: "Left click", actionIndex: 4), "Left click  ·  4")
+    }
+
+    func testShortWaitCountsDownInMilliseconds() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(
+            OverlayReadout.countdown(waitMilliseconds: 100, startedAt: start, at: start),
+            "100ms"
+        )
+        XCTAssertEqual(
+            OverlayReadout.countdown(
+                waitMilliseconds: 100,
+                startedAt: start,
+                at: start.addingTimeInterval(0.04)
+            ),
+            "60ms"
+        )
+    }
+
+    func testLongWaitCountsDownInWholeSeconds() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(
+            OverlayReadout.countdown(waitMilliseconds: 2_500, startedAt: start, at: start),
+            "3s"
+        )
+        XCTAssertEqual(
+            OverlayReadout.countdown(
+                waitMilliseconds: 2_500,
+                startedAt: start,
+                at: start.addingTimeInterval(1.6)
+            ),
+            "1s"
+        )
+    }
+
+    func testFractionAdvancesAcrossTheWait() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(
+            OverlayReadout.fraction(waitMilliseconds: 100, startedAt: start, at: start.addingTimeInterval(0.05)),
+            0.5,
+            accuracy: 0.001
+        )
+    }
+}
+
+final class PointerMotionTests: XCTestCase {
+    func testMoveIsSkippedWhenThePointerIsAlreadyThere() {
+        let point = CGPoint(x: 10, y: 20)
+        XCTAssertFalse(PointerMotion.needsMove(from: point, to: point))
+        XCTAssertFalse(PointerMotion.needsMove(from: point, to: CGPoint(x: 11, y: 20)))
+        XCTAssertTrue(PointerMotion.needsMove(from: point, to: CGPoint(x: 14, y: 20)))
     }
 }
 

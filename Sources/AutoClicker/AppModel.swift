@@ -19,7 +19,12 @@ final class AppModel: ObservableObject {
     @Published var availableUpdate: AvailableUpdate?
     @Published var updateCheckState: UpdateCheckState = .idle
     @Published var isUpdating = false
-    @Published var runCue: RunCue?
+    /// Not published. Posting every action through `objectWillChange` redraws the
+    /// control panel and starves the action card.
+    var runCue: RunCue? {
+        didSet { runCueHandler?(runCue) }
+    }
+    var runCueHandler: (@MainActor (RunCue?) -> Void)?
     @Published private(set) var invalidNumericFieldIDs: Set<String> = []
 
     private let poster: InputPosting
@@ -276,9 +281,7 @@ final class AppModel: ObservableObject {
         runner.start(
             settings: snapshot,
             onCue: { [weak self] cue in
-                Task { @MainActor in
-                    self?.runCue = cue
-                }
+                self?.runCue = cue
             },
             onFinished: { [weak self] in
                 self?.isRunning = false
